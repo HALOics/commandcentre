@@ -65,7 +65,7 @@ export default function LoginPage() {
         <div className="login-halo-mark" aria-label="HALO logo">
           <img src={haloLogo} alt="HALO logo" />
         </div>
-        <h1>Halo Command Centre</h1>
+        <h1>Command Centre</h1>
         <p>
           Password-free access only. Sign in with your Microsoft 365 identity to open the live HALO operational
           workspace.

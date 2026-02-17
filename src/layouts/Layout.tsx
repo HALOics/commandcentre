@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import { navigation } from "../navigation";
@@ -12,6 +12,7 @@ import haloLogo from "../assets/halo-logo.svg";
 import clientLogo from "../assets/client-logo.png";
 
 type Theme = "light" | "dark";
+const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
 
 function BellIcon() {
   return (
@@ -64,6 +65,8 @@ export default function Layout() {
   const [theme, setTheme] = useState<Theme>("light");
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [messengerUnreadCount, setMessengerUnreadCount] = useState<number>(() => readMessengerUnreadCount());
+  const inactivityTimeoutRef = useRef<number | null>(null);
+  const idleLogoutTriggeredRef = useRef(false);
 
   const account = useMemo(() => instance.getActiveAccount() ?? accounts[0], [accounts, instance]);
   const displayName = account?.name || account?.username || "HALO Operator";
@@ -118,7 +121,7 @@ export default function Layout() {
     document.documentElement.setAttribute("data-theme", nextTheme);
   }
 
-  async function logout() {
+  const logout = useCallback(async (reason: "manual" | "idle" = "manual") => {
     setDevAuthenticated(false);
 
     if (!account) {
@@ -127,6 +130,14 @@ export default function Layout() {
     }
 
     try {
+      if (reason === "idle") {
+        await instance.logoutRedirect({
+          account,
+          postLogoutRedirectUri: `${window.location.origin}/login`
+        });
+        return;
+      }
+
       await instance.logoutPopup({
         account,
         mainWindowRedirectUri: window.location.origin
@@ -135,7 +146,48 @@ export default function Layout() {
       console.error("Logout failed", error);
       window.location.assign("/login");
     }
-  }
+  }, [account, instance]);
+
+  useEffect(() => {
+    const activityEvents: Array<keyof WindowEventMap> = [
+      "mousemove",
+      "mousedown",
+      "keydown",
+      "scroll",
+      "touchstart",
+      "pointerdown"
+    ];
+
+    const resetInactivityTimer = () => {
+      if (idleLogoutTriggeredRef.current) {
+        return;
+      }
+
+      if (inactivityTimeoutRef.current !== null) {
+        window.clearTimeout(inactivityTimeoutRef.current);
+      }
+
+      inactivityTimeoutRef.current = window.setTimeout(() => {
+        if (idleLogoutTriggeredRef.current) {
+          return;
+        }
+
+        idleLogoutTriggeredRef.current = true;
+        void logout("idle");
+      }, INACTIVITY_TIMEOUT_MS);
+    };
+
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, resetInactivityTimer));
+    resetInactivityTimer();
+
+    return () => {
+      if (inactivityTimeoutRef.current !== null) {
+        window.clearTimeout(inactivityTimeoutRef.current);
+      }
+
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, resetInactivityTimer));
+    };
+  }, [logout]);
 
   return (
     <div className="app-shell">
@@ -158,12 +210,12 @@ export default function Layout() {
                 return (
                   <div
                     key={item.href}
-                    className={`nav-item nav-dropdown ${isActive ? "active" : ""} ${isOpen ? "open" : ""} ${
+                    className={`nav-item nav-dropdown ${item.disabled ? "disabled" : ""} ${isActive ? "active" : ""} ${isOpen ? "open" : ""} ${
                       hasMessengerUnread ? "has-unread" : ""
                     }`}
-                    onMouseEnter={() => setOpenDropdown(item.href)}
+                    onMouseEnter={() => !item.disabled && setOpenDropdown(item.href)}
                     onMouseLeave={() => setOpenDropdown((current) => (current === item.href ? null : current))}
-                    onFocusCapture={() => setOpenDropdown(item.href)}
+                    onFocusCapture={() => !item.disabled && setOpenDropdown(item.href)}
                     onBlurCapture={(event) => {
                       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
                         setOpenDropdown(null);
@@ -171,9 +223,9 @@ export default function Layout() {
                     }}
                   >
                     <Link
-                      to={item.href}
-                      className={`nav-link ${isActive ? "active" : ""} ${hasMessengerUnread ? "has-unread" : ""}`}
-                      onClick={() => setOpenDropdown(null)}
+                      to={item.disabled ? "#" : item.href}
+                      className={`nav-link ${item.disabled ? "disabled" : ""} ${isActive ? "active" : ""} ${hasMessengerUnread ? "has-unread" : ""}`}
+                      onClick={() => (!item.disabled ? setOpenDropdown(null) : null)}
                     >
                       {item.name}
                     </Link>
@@ -201,9 +253,9 @@ export default function Layout() {
               return (
                 <div key={item.href} className="nav-item">
                   <Link
-                    to={item.href}
-                    className={`nav-link ${isActive ? "active" : ""} ${hasMessengerUnread ? "has-unread" : ""}`}
-                    onClick={() => setOpenDropdown(null)}
+                    to={item.disabled ? "#" : item.href}
+                    className={`nav-link ${item.disabled ? "disabled" : ""} ${isActive ? "active" : ""} ${hasMessengerUnread ? "has-unread" : ""}`}
+                    onClick={() => (!item.disabled ? setOpenDropdown(null) : null)}
                   >
                     {item.name}
                   </Link>
@@ -222,7 +274,7 @@ export default function Layout() {
             {theme === "dark" ? <SunIcon /> : <MoonIcon />}
           </button>
 
-          <button className="user-profile-btn" onClick={logout} title="Sign out">
+          <button className="user-profile-btn" onClick={() => void logout("manual")} title="Sign out">
             <div className="user-avatar">{initials}</div>
             <div className="user-copy">
               <strong>{displayName}</strong>

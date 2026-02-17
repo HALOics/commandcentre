@@ -8,23 +8,28 @@ import moodLowestIcon from "../assets/moods/mood_lowest.png";
 import { WidgetId, WidgetSize } from "./dashboardConfig";
 
 type MoodLevel = "best" | "good" | "neutral" | "low" | "lowest";
+type PeopleSortKey = "none" | "keyWorker" | "zone" | "recentMood";
+type TeamSortKey = "none" | "lineManager" | "zone";
 
 type PersonCard = {
   name: string;
   mood: MoodLevel;
+  keyWorker: string;
+  zone: string;
+  moodUpdatedMinutes: number; // minutes ago for ordering
 };
 
 const PEOPLE_WIDGET_MOOD_KEY = "halo_people_widget_mood_enabled";
 
 const people: PersonCard[] = [
-  { name: "Arden Finch", mood: "best" },
-  { name: "Blaire Mason", mood: "good" },
-  { name: "Delaney Price", mood: "neutral" },
-  { name: "Elliot Shore", mood: "good" },
-  { name: "Gray Monroe", mood: "best" },
-  { name: "Indigo Hart", mood: "low" },
-  { name: "Jules Carter", mood: "good" },
-  { name: "Kieran West", mood: "neutral" }
+  { name: "Arden Finch", mood: "best", keyWorker: "T. Quinn", zone: "Maple", moodUpdatedMinutes: 18 },
+  { name: "Blaire Mason", mood: "good", keyWorker: "R. Lang", zone: "Harbor", moodUpdatedMinutes: 42 },
+  { name: "Delaney Price", mood: "neutral", keyWorker: "A. Reed", zone: "Orchard", moodUpdatedMinutes: 63 },
+  { name: "Elliot Shore", mood: "good", keyWorker: "S. Ives", zone: "Maple", moodUpdatedMinutes: 27 },
+  { name: "Gray Monroe", mood: "best", keyWorker: "P. North", zone: "Harbor", moodUpdatedMinutes: 35 },
+  { name: "Indigo Hart", mood: "low", keyWorker: "C. Bloom", zone: "Orbit", moodUpdatedMinutes: 9 },
+  { name: "Jules Carter", mood: "good", keyWorker: "D. Flynn", zone: "Orchard", moodUpdatedMinutes: 51 },
+  { name: "Kieran West", mood: "neutral", keyWorker: "V. Mercer", zone: "Maple", moodUpdatedMinutes: 75 }
 ];
 
 const moodIcons: Record<MoodLevel, string> = {
@@ -68,6 +73,23 @@ const supportFeedbackEntries = [
   { serviceUser: "Delta-07", rating: 3, comment: "Good visit overall, but arrival time was later than expected." }
 ];
 
+type TeamMember = {
+  name: string;
+  lineManager: string;
+  zone: string;
+};
+
+const teamMembers: TeamMember[] = [
+  { name: "Aster Cole", lineManager: "M. Orr", zone: "Maple" },
+  { name: "Briar Lane", lineManager: "M. Orr", zone: "Harbor" },
+  { name: "Corin Miles", lineManager: "S. Drew", zone: "Orbit" },
+  { name: "Evan Price", lineManager: "S. Drew", zone: "Maple" },
+  { name: "Finley Shah", lineManager: "J. Patel", zone: "Cedar" },
+  { name: "Gia Patel", lineManager: "J. Patel", zone: "Orchard" },
+  { name: "Hayden Ives", lineManager: "M. Orr", zone: "Harbor" },
+  { name: "Imani Reid", lineManager: "J. Patel", zone: "Orbit" }
+];
+
 function PeopleWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
   const [showMood, setShowMood] = useState<boolean>(() => {
     if (typeof window === "undefined") {
@@ -85,6 +107,36 @@ function PeopleWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
 
     window.localStorage.setItem(PEOPLE_WIDGET_MOOD_KEY, showMood ? "1" : "0");
   }, [showMood]);
+
+  const [sortKey, setSortKey] = useState<PeopleSortKey>("none");
+  const [filterValue, setFilterValue] = useState<string>("all");
+
+  const keyWorkerOptions = Array.from(new Set(people.map((p) => p.keyWorker))).sort();
+  const zoneOptions = Array.from(new Set(people.map((p) => p.zone))).sort();
+
+  const sortedPeople = (() => {
+    const baseList = size === "detailed" ? people : people.slice(0, 8);
+    let list = [...baseList];
+
+    if (sortKey === "keyWorker" && filterValue !== "all") {
+      list = list.filter((p) => p.keyWorker === filterValue);
+    }
+
+    if (sortKey === "zone" && filterValue !== "all") {
+      list = list.filter((p) => p.zone === filterValue);
+    }
+
+    switch (sortKey) {
+      case "keyWorker":
+        return list.sort((a, b) => a.keyWorker.localeCompare(b.keyWorker) || a.name.localeCompare(b.name));
+      case "zone":
+        return list.sort((a, b) => a.zone.localeCompare(b.zone) || a.name.localeCompare(b.name));
+      case "recentMood":
+        return list.sort((a, b) => a.moodUpdatedMinutes - b.moodUpdatedMinutes);
+      default:
+        return list;
+    }
+  })();
 
   if (size === "brief") {
     return (
@@ -104,12 +156,62 @@ function PeopleWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
     );
   }
 
-  const list = size === "detailed" ? people : people.slice(0, 8);
-
   return (
     <>
+      <div className="widget-row">
+        <label className="widget-select" aria-label="Arrange service users">
+          <span>Arrange</span>
+          <select
+            value={sortKey}
+            onChange={(event) => {
+              const next = event.target.value as PeopleSortKey;
+              setSortKey(next);
+              setFilterValue("all");
+            }}
+          >
+            <option value="none">Show all</option>
+            <option value="keyWorker">Key Worker</option>
+            <option value="zone">Zone</option>
+            <option value="recentMood">Recent mood update</option>
+          </select>
+        </label>
+
+        {sortKey === "keyWorker" ? (
+          <label className="widget-select" aria-label="Filter by key worker">
+            <span>Key Worker</span>
+            <select value={filterValue} onChange={(event) => setFilterValue(event.target.value)}>
+              <option value="all">All</option>
+              {keyWorkerOptions.map((worker) => (
+                <option key={worker} value={worker}>
+                  {worker}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        {sortKey === "zone" ? (
+          <label className="widget-select" aria-label="Filter by zone">
+            <span>Zone</span>
+            <select value={filterValue} onChange={(event) => setFilterValue(event.target.value)}>
+              <option value="all">All</option>
+              {zoneOptions.map((zone) => (
+                <option key={zone} value={zone}>
+                  {zone}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        <label className="people-widget-toggle" aria-label="Show mood emojis in people widget">
+          <input type="checkbox" checked={showMood} onChange={(event) => setShowMood(event.target.checked)} />
+          <span>Mood emojis</span>
+        </label>
+      </div>
+
       <div className="avatar-grid">
-        {list.map((person) => (
+        {sortedPeople.map((person) => (
           <div key={person.name} className="avatar-chip">
             <span className="avatar-face">
               {person.name.slice(0, 2).toUpperCase()}
@@ -123,11 +225,112 @@ function PeopleWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
       </div>
       {size === "detailed" ? <p className="summary-copy">2 onboarding profiles need completion this week.</p> : null}
       <div className="widget-actions">
-        <label className="people-widget-toggle" aria-label="Show mood emojis in people widget">
-          <input type="checkbox" checked={showMood} onChange={(event) => setShowMood(event.target.checked)} />
-          <span>Mood emojis</span>
-        </label>
         <Link className="btn-outline" to="/people">
+          View All
+        </Link>
+      </div>
+    </>
+  );
+}
+
+function TeamWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
+  if (size === "brief") {
+    return (
+      <div className="brief-block">
+        <p className="summary-copy">
+          <strong>6</strong> team members online
+        </p>
+      </div>
+    );
+  }
+
+  const [sortKey, setSortKey] = useState<TeamSortKey>("none");
+  const [filterValue, setFilterValue] = useState<string>("all");
+
+  const lineManagerOptions = Array.from(new Set(teamMembers.map((m) => m.lineManager))).sort();
+  const zoneOptions = Array.from(new Set(teamMembers.map((m) => m.zone))).sort();
+
+  const sortedTeam = (() => {
+    const base = size === "detailed" ? teamMembers : teamMembers.slice(0, 6);
+    let list = [...base];
+
+    if (sortKey === "lineManager" && filterValue !== "all") {
+      list = list.filter((m) => m.lineManager === filterValue);
+    }
+
+    if (sortKey === "zone" && filterValue !== "all") {
+      list = list.filter((m) => m.zone === filterValue);
+    }
+
+    switch (sortKey) {
+      case "lineManager":
+        return list.sort((a, b) => a.lineManager.localeCompare(b.lineManager) || a.name.localeCompare(b.name));
+      case "zone":
+        return list.sort((a, b) => a.zone.localeCompare(b.zone) || a.name.localeCompare(b.name));
+      default:
+        return list;
+    }
+  })();
+
+  return (
+    <>
+      <div className="widget-row">
+        <label className="widget-select" aria-label="Arrange team">
+          <span>Arrange</span>
+          <select
+            value={sortKey}
+            onChange={(event) => {
+              const next = event.target.value as TeamSortKey;
+              setSortKey(next);
+              setFilterValue("all");
+            }}
+          >
+            <option value="none">Show all</option>
+            <option value="lineManager">Line manager</option>
+            <option value="zone">Zone</option>
+          </select>
+        </label>
+
+        {sortKey === "lineManager" ? (
+          <label className="widget-select" aria-label="Filter by line manager">
+            <span>Line manager</span>
+            <select value={filterValue} onChange={(event) => setFilterValue(event.target.value)}>
+              <option value="all">All</option>
+              {lineManagerOptions.map((manager) => (
+                <option key={manager} value={manager}>
+                  {manager}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        {sortKey === "zone" ? (
+          <label className="widget-select" aria-label="Filter by zone">
+            <span>Zone</span>
+            <select value={filterValue} onChange={(event) => setFilterValue(event.target.value)}>
+              <option value="all">All</option>
+              {zoneOptions.map((zone) => (
+                <option key={zone} value={zone}>
+                  {zone}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+      </div>
+
+      <div className="avatar-grid compact">
+        {sortedTeam.map((member) => (
+          <div key={member.name} className="avatar-chip">
+            <span>{member.name.slice(0, 2).toUpperCase()}</span>
+            <small>{member.name}</small>
+          </div>
+        ))}
+      </div>
+      {size === "detailed" ? <p className="summary-copy">Next rota handoff in 42 minutes.</p> : null}
+      <div className="widget-actions">
+        <Link className="btn-outline" to="/team">
           View All
         </Link>
       </div>
@@ -252,36 +455,7 @@ export function renderWidgetBody(id: WidgetId, size: WidgetSize): JSX.Element | 
     }
 
     case "team": {
-      if (size === "brief") {
-        return (
-          <div className="brief-block">
-            <p className="summary-copy">
-              <strong>6</strong> team members online
-            </p>
-          </div>
-        );
-      }
-
-      const list = ["Ops-A1", "Ops-B6", "Ops-C3", "Ops-D8", "Ops-E2", "Ops-F9"];
-
-      return (
-        <>
-          <div className="avatar-grid compact">
-            {list.map((person) => (
-              <div key={person} className="avatar-chip">
-                <span>{person.slice(0, 2).toUpperCase()}</span>
-                <small>{person}</small>
-              </div>
-            ))}
-          </div>
-          {size === "detailed" ? <p className="summary-copy">Next rota handoff in 42 minutes.</p> : null}
-          <div className="widget-actions">
-            <Link className="btn-outline" to="/people">
-              View All
-            </Link>
-          </div>
-        </>
-      );
+      return <TeamWidgetBody size={size} />;
     }
 
     case "todos": {

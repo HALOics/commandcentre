@@ -7,6 +7,7 @@ export type NavigationItem = {
   name: string;
   href: string;
   children?: NavigationChild[];
+  disabled?: boolean;
 };
 
 export const navigation: NavigationItem[] = [
@@ -37,9 +38,11 @@ export const navigation: NavigationItem[] = [
       { name: "Clinical", href: "/clinical" },
       { name: "eMar", href: "/emar" },
       { name: "Occupational Therapy", href: "/occupational-therapy" }
-    ]
+    ],
+    disabled: true
   },
-  { name: "Rota", href: "/rota" },
-  { name: "Reports", href: "/reports" },
+  { name: "Rota", href: "/rota", disabled: true },
+  { name: "Reports", href: "/reports", disabled: true },
+  { name: "Subscription", href: "/subscriptions", disabled: true },
   { name: "Settings", href: "/settings" }
 ];

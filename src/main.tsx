@@ -3,6 +3,7 @@ import { MsalProvider } from "@azure/msal-react";
 import { AuthenticationResult, EventMessage, EventType } from "@azure/msal-browser";
 import App from "./App";
 import "./index.css";
+import { applyAccessibilityPreferences, readAccessibilityPreferences } from "./accessibility/preferences";
 import { msalInstance } from "./auth/msal";
 
 const rootElement = document.getElementById("root");
@@ -12,6 +13,7 @@ if (!rootElement) {
 }
 
 const root = ReactDOM.createRoot(rootElement);
+applyAccessibilityPreferences(readAccessibilityPreferences());
 
 function setInitialAccount(): void {
   if (!msalInstance.getActiveAccount()) {

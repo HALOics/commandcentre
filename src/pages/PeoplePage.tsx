@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject, type ChangeEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import moodBestIcon from "../assets/moods/mood_best.png";
 import moodGoodIcon from "../assets/moods/mood_good.png";
@@ -46,9 +46,24 @@ type ImportantContact = {
   name: string;
   role: string;
   phone: string;
+  relation?: "Personal" | "Professional" | "Clinical";
+};
+
+type DocumentItem = {
+  id: string;
+  title: string;
+  category: string;
+  updated: string;
 };
 
 type ServiceUserProfileData = {
+  preferredName: string;
+  firstName: string;
+  lastName: string;
+  gender: string;
+  dateOfBirth: string;
+  maritalStatus: string;
+  birthplace: string;
   identityLine: string;
   allergiesSummary: string;
   dnacpr: string;
@@ -62,6 +77,12 @@ type ServiceUserProfileData = {
   careInfo: ProfileField[];
   siteInfo: ProfileField[];
   contactInfo: ProfileField[];
+  nationality: string;
+  languages: string[];
+  ethnicity: string;
+  religion: string;
+  carerGenderPreference: string;
+  carerNote: string;
   importantPeople: ImportantContact[];
   aboutMe: string;
   futurePlans: string;
@@ -319,6 +340,51 @@ const genderSeeds = [
   "Female"
 ];
 
+const nationalitySeeds = [
+  "British",
+  "Irish",
+  "Polish",
+  "American",
+  "Canadian",
+  "Australian",
+  "South African",
+  "Indian",
+  "Pakistani",
+  "Nigerian",
+  "Spanish",
+  "Italian"
+];
+
+const ethnicitySeeds = [
+  "White British",
+  "Irish",
+  "Polish",
+  "Black African",
+  "Black Caribbean",
+  "Asian Indian",
+  "Asian Pakistani",
+  "Mixed",
+  "Other European",
+  "White British",
+  "Black African",
+  "Asian Bangladeshi"
+];
+
+const languageSeeds = [
+  ["English"],
+  ["English", "ASL"],
+  ["English", "Polish"],
+  ["English"],
+  ["English", "French"],
+  ["English"],
+  ["English", "British Sign Language"],
+  ["English", "Hindi"],
+  ["English", "Urdu"],
+  ["English", "Yoruba"],
+  ["English", "Spanish"],
+  ["English", "Italian"]
+];
+
 const maritalStatusSeeds = [
   "Single",
   "Married",
@@ -401,6 +467,25 @@ const aboutMeSeeds = [
   "Enjoys short outdoor walks and music sessions. Benefits from prompts before transitions between activities.",
   "Values predictable support and quiet spaces during peak periods. Best communication style is step-by-step.",
   "Responds positively to familiar staff and structured daily plans. Prefers concise updates and reassurance."
+];
+
+const documentCategories = [
+  "Accident & Incident",
+  "Care Plans",
+  "Consent",
+  "DNACPR",
+  "Risk assessments",
+  "Support Plans",
+  "eMar",
+  "Clinical",
+  "Housing",
+  "Medication",
+  "Mental and Social State",
+  "Initial Assessment",
+  "Letters",
+  "Hospital Discharge",
+  "Useful Charts",
+  "Other"
 ];
 
 const futurePlanSeeds = [
@@ -577,7 +662,7 @@ function buildProfileData(serviceUser: ServiceUser): ServiceUserProfileData {
     { label: "Status", value: statusLabels[serviceUser.status] }
   ];
 
-  const careInfo: ProfileField[] = [
+const careInfo: ProfileField[] = [
     { label: "DNACPR", value: dnacpr },
     { label: "DoLS status", value: dolsStatus },
     { label: "Allergies", value: allergiesSummary },
@@ -604,6 +689,13 @@ function buildProfileData(serviceUser: ServiceUser): ServiceUserProfileData {
     { label: "Emergency contact", value: familyContact },
     { label: "Emergency phone", value: makePhone(index, 37) }
   ];
+
+  const nationality = seedAt(nationalitySeeds, index);
+  const languages = seedAt(languageSeeds, index);
+  const ethnicity = seedAt(ethnicitySeeds, index);
+  const religion = index % 3 === 0 ? "Christian" : index % 3 === 1 ? "None stated" : "Muslim";
+  const carerGenderPreference = index % 2 === 0 ? "Female" : "Male";
+  const carerNote = index % 2 === 0 ? "Prefers consistent morning team" : "No specific preference";
 
   const importantPeople: ImportantContact[] = [
     { name: serviceUser.keyWorker, role: "Key worker", phone: makePhone(index, 21) },
@@ -648,6 +740,13 @@ function buildProfileData(serviceUser: ServiceUser): ServiceUserProfileData {
   ];
 
   return {
+    preferredName: firstName,
+    firstName,
+    lastName: serviceUser.name.split(" ").slice(1).join(" ") || firstName,
+    gender,
+    dateOfBirth,
+    maritalStatus,
+    birthplace,
     identityLine: `${formatLongDate(dateOfBirth)} (${age}) · ${gender}`,
     allergiesSummary,
     dnacpr,
@@ -661,6 +760,12 @@ function buildProfileData(serviceUser: ServiceUser): ServiceUserProfileData {
     careInfo,
     siteInfo,
     contactInfo,
+    nationality,
+    languages,
+    ethnicity,
+    religion,
+    carerGenderPreference,
+    carerNote,
     importantPeople,
     aboutMe,
     futurePlans,
@@ -709,6 +814,51 @@ export default function PeoplePage() {
   const [zoneFilters, setZoneFilters] = useState<string[]>([]);
   const [flagFilters, setFlagFilters] = useState<UserFlag[]>([]);
   const [activeProfilePanel, setActiveProfilePanel] = useState<ProfilePanelId>("general");
+  const [importantContacts, setImportantContacts] = useState<ImportantContact[]>([]);
+  const [showContactForm, setShowContactForm] = useState(false);
+  const [newContact, setNewContact] = useState<ImportantContact>({
+    name: "",
+    role: "",
+    phone: "",
+    relation: "Personal"
+  });
+  const [profilePhotos, setProfilePhotos] = useState<Record<string, string>>({});
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [showDocForm, setShowDocForm] = useState(false);
+  const [newDocTitle, setNewDocTitle] = useState("");
+  const [newDocCategory, setNewDocCategory] = useState(documentCategories[0]);
+  const [personalEditOpen, setPersonalEditOpen] = useState(false);
+  const [personalOverrides, setPersonalOverrides] = useState<Partial<ServiceUserProfileData>>({});
+  const [personalForm, setPersonalForm] = useState({
+    preferredName: "",
+    firstName: "",
+    lastName: "",
+    gender: "",
+    dateOfBirth: "",
+    maritalStatus: "",
+    birthplace: "",
+    nationality: "",
+    languages: "",
+    ethnicity: "",
+    religion: "",
+    carerGenderPreference: "",
+    carerNote: ""
+  });
+
+  const panelRefs: Record<ProfilePanelId, RefObject<HTMLElement>> = {
+    general: useRef<HTMLElement>(null),
+    needs: useRef<HTMLElement>(null),
+    important: useRef<HTMLElement>(null),
+    about: useRef<HTMLElement>(null),
+    future: useRef<HTMLElement>(null),
+    logs: useRef<HTMLElement>(null),
+    charts: useRef<HTMLElement>(null),
+    documents: useRef<HTMLElement>(null),
+    carePlanning: useRef<HTMLElement>(null),
+    medication: useRef<HTMLElement>(null),
+    consent: useRef<HTMLElement>(null)
+  };
 
   useEffect(() => {
     setActiveProfilePanel("general");
@@ -728,6 +878,41 @@ export default function PeoplePage() {
     () => (selectedServiceUser ? buildProfileData(selectedServiceUser) : null),
     [selectedServiceUser]
   );
+
+  useEffect(() => {
+    if (profileData) {
+      setImportantContacts(profileData.importantPeople);
+      setShowContactForm(false);
+      setNewContact({ name: "", role: "", phone: "", relation: "Personal" });
+      setDocuments(
+        profileData.documents.map((title, idx) => ({
+          id: `${serviceUserId || "doc"}-${idx}`,
+          title,
+          category: idx % 2 === 0 ? "Care Plans" : "General",
+          updated: "This week"
+        }))
+      );
+      setShowDocForm(false);
+      setNewDocTitle("");
+      setNewDocCategory(documentCategories[0]);
+      setPersonalOverrides({});
+      setPersonalForm({
+        preferredName: profileData.preferredName,
+        firstName: profileData.firstName,
+        lastName: profileData.lastName,
+        gender: profileData.gender,
+        dateOfBirth: formatLongDate(profileData.dateOfBirth),
+        maritalStatus: profileData.maritalStatus,
+        birthplace: profileData.birthplace,
+        nationality: profileData.nationality,
+        languages: profileData.languages.join(", "),
+        ethnicity: profileData.ethnicity,
+        religion: profileData.religion,
+        carerGenderPreference: profileData.carerGenderPreference,
+        carerNote: profileData.carerNote
+      });
+    }
+  }, [profileData, serviceUserId]);
 
   const zoneOptions = useMemo(
     () => Array.from(new Set(mockServiceUsers.map((serviceUser) => serviceUser.zone))).sort(),
@@ -778,6 +963,50 @@ export default function PeoplePage() {
     );
   }
 
+  function addDocument(event: React.FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (!newDocTitle.trim()) return;
+    setDocuments((current) => [
+      {
+        id: `new-${Date.now()}`,
+        title: newDocTitle.trim(),
+        category: newDocCategory,
+        updated: "Just now"
+      },
+      ...current
+    ]);
+    setNewDocTitle("");
+    setNewDocCategory(documentCategories[0]);
+    setShowDocForm(false);
+  }
+
+  function savePersonalInfo(event: React.FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    const cleanLanguages = personalForm.languages
+      .split(",")
+      .map((w) => w.trim())
+      .filter(Boolean);
+
+    const overrides: Partial<ServiceUserProfileData> = {
+      preferredName: personalForm.preferredName.trim(),
+      firstName: personalForm.firstName.trim(),
+      lastName: personalForm.lastName.trim(),
+      gender: personalForm.gender.trim(),
+      dateOfBirth: personalForm.dateOfBirth.trim(),
+      maritalStatus: personalForm.maritalStatus.trim(),
+      birthplace: personalForm.birthplace.trim(),
+      nationality: personalForm.nationality.trim(),
+      languages: cleanLanguages,
+      ethnicity: personalForm.ethnicity.trim(),
+      religion: personalForm.religion.trim(),
+      carerGenderPreference: personalForm.carerGenderPreference.trim(),
+      carerNote: personalForm.carerNote.trim()
+    };
+
+    setPersonalOverrides(overrides);
+    setPersonalEditOpen(false);
+  }
+
   function toggleZoneFilter(zone: string): void {
     setZoneFilters((current) => (current.includes(zone) ? current.filter((entry) => entry !== zone) : [...current, zone]));
   }
@@ -794,6 +1023,31 @@ export default function PeoplePage() {
 
   const hasAnyFilter =
     statusFilters.length > 0 || zoneFilters.length > 0 || flagFilters.length > 0 || searchQuery.trim().length > 0;
+
+  function addImportantContact(event: React.FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (!newContact.name.trim()) {
+      return;
+    }
+    setImportantContacts((current) => [
+      { ...newContact, name: newContact.name.trim(), role: newContact.role.trim(), phone: newContact.phone.trim() },
+      ...current
+    ]);
+    setNewContact({ name: "", role: "", phone: "", relation: "Personal" });
+    setShowContactForm(false);
+  }
+
+  function handlePhotoUpload(event: ChangeEvent<HTMLInputElement>): void {
+    const file = event.target.files?.[0];
+    if (!file || !selectedServiceUser) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setProfilePhotos((prev) => ({ ...prev, [selectedServiceUser.id]: String(reader.result) }));
+    };
+    reader.readAsDataURL(file);
+    // reset the input so the same file can be chosen again if needed
+    event.target.value = "";
+  }
 
   if (serviceUserId && !selectedServiceUser) {
     return (
@@ -814,6 +1068,7 @@ export default function PeoplePage() {
       const panelList = Array.isArray(panel) ? panel : [panel];
       return panelList.includes(activeProfilePanel);
     };
+    const profilePhoto = profilePhotos[selectedServiceUser.id];
 
     return (
       <section className="people-profile-page">
@@ -822,16 +1077,36 @@ export default function PeoplePage() {
             <BackIcon />
             People list
           </button>
-
-          <button type="button" className="btn-outline people-profile-passport-btn">
-            <PassportIcon />
-            Hospital Passport
-          </button>
         </header>
 
         <article className="people-profile-hero">
-          <div className="people-profile-hero-main">
-            <div className={`people-profile-avatar palette-${selectedUserIndex % 6}`}>{getInitials(selectedServiceUser.name)}</div>
+            <div className="people-profile-hero-main">
+            <div className="people-profile-avatar-shell">
+              <div
+                className={`people-profile-avatar ${profilePhoto ? "has-photo" : `palette-${selectedUserIndex % 6}`}`}
+              >
+                {profilePhoto ? (
+                  <img src={profilePhoto} alt={`${selectedServiceUser.name} profile`} />
+                ) : (
+                  getInitials(selectedServiceUser.name)
+                )}
+              </div>
+              <button
+                type="button"
+                className="people-profile-avatar-edit"
+                aria-label="Change profile photo"
+                onClick={() => photoInputRef.current?.click()}
+              >
+                <EditIcon />
+              </button>
+              <input
+                ref={photoInputRef}
+                className="people-avatar-input"
+                type="file"
+                accept="image/*"
+                onChange={handlePhotoUpload}
+              />
+            </div>
             <div className="people-profile-title-wrap">
               <p className="eyebrow">HALO Service Profile</p>
               <h1>{selectedServiceUser.name}</h1>
@@ -901,6 +1176,10 @@ export default function PeoplePage() {
 
         <div className="people-profile-shell">
           <aside className="people-profile-menu-card">
+            <button type="button" className="people-profile-menu-item passport-link">
+              <PassportIcon />
+              Hospital Passport
+            </button>
             {profileMenuGroups.map((group) => (
               <section key={group.heading} className="people-profile-menu-group">
                 <h3>{group.heading}</h3>
@@ -910,7 +1189,15 @@ export default function PeoplePage() {
                       key={item.id}
                       type="button"
                       className={`people-profile-menu-item ${activeProfilePanel === item.id ? "active" : ""}`}
-                      onClick={() => setActiveProfilePanel(item.id)}
+                      onClick={() => {
+                        setActiveProfilePanel(item.id);
+                        const target = panelRefs[item.id].current;
+                        if (target) {
+                          requestAnimationFrame(() =>
+                            target.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" })
+                          );
+                        }
+                      }}
                     >
                       {item.label}
                     </button>
@@ -921,18 +1208,170 @@ export default function PeoplePage() {
           </aside>
 
           <div className="people-profile-content-grid">
-            <article className={`people-profile-card span-2 ${panelIs("general") ? "focus" : ""}`}>
+            <article
+              ref={panelRefs.general}
+              className={`people-profile-card span-2 ${panelIs("general") ? "focus" : ""}`}
+            >
               <header>
                 <h2>Personal information</h2>
-                <button type="button" className="profile-edit-btn">
+                <button type="button" className="profile-edit-btn" onClick={() => setPersonalEditOpen((v) => !v)}>
                   <EditIcon />
-                  Edit
+                  {personalEditOpen ? "Close" : "Edit"}
                 </button>
               </header>
-              {renderTableRows(profileData.personalInfo)}
+
+              {personalEditOpen ? (
+                <form className="people-personal-form" onSubmit={savePersonalInfo}>
+                  <div className="people-personal-grid">
+                    <label>
+                      <span>Preferred name</span>
+                      <input
+                        type="text"
+                        value={personalForm.preferredName}
+                        onChange={(e) => setPersonalForm((f) => ({ ...f, preferredName: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>First name</span>
+                      <input
+                        type="text"
+                        value={personalForm.firstName}
+                        onChange={(e) => setPersonalForm((f) => ({ ...f, firstName: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Last name</span>
+                      <input
+                        type="text"
+                        value={personalForm.lastName}
+                        onChange={(e) => setPersonalForm((f) => ({ ...f, lastName: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Gender</span>
+                      <input
+                        type="text"
+                        value={personalForm.gender}
+                        onChange={(e) => setPersonalForm((f) => ({ ...f, gender: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Date of birth</span>
+                      <input
+                        type="text"
+                        value={personalForm.dateOfBirth}
+                        onChange={(e) => setPersonalForm((f) => ({ ...f, dateOfBirth: e.target.value }))}
+                        placeholder="e.g. 16 May 1989"
+                      />
+                    </label>
+                    <label>
+                      <span>Marital status</span>
+                      <input
+                        type="text"
+                        value={personalForm.maritalStatus}
+                        onChange={(e) => setPersonalForm((f) => ({ ...f, maritalStatus: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Birthplace</span>
+                      <input
+                        type="text"
+                        value={personalForm.birthplace}
+                        onChange={(e) => setPersonalForm((f) => ({ ...f, birthplace: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Nationality</span>
+                      <input
+                        type="text"
+                        value={personalForm.nationality}
+                        onChange={(e) => setPersonalForm((f) => ({ ...f, nationality: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Languages spoken</span>
+                      <input
+                        type="text"
+                        value={personalForm.languages}
+                        onChange={(e) => setPersonalForm((f) => ({ ...f, languages: e.target.value }))}
+                        placeholder="Comma separated"
+                      />
+                    </label>
+                    <label>
+                      <span>Ethnicity</span>
+                      <input
+                        type="text"
+                        value={personalForm.ethnicity}
+                        onChange={(e) => setPersonalForm((f) => ({ ...f, ethnicity: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Religion</span>
+                      <input
+                        type="text"
+                        value={personalForm.religion}
+                        onChange={(e) => setPersonalForm((f) => ({ ...f, religion: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Carer gender preference</span>
+                      <input
+                        type="text"
+                        value={personalForm.carerGenderPreference}
+                        onChange={(e) => setPersonalForm((f) => ({ ...f, carerGenderPreference: e.target.value }))}
+                      />
+                    </label>
+                    <label className="personal-note-field">
+                      <span>Carer note</span>
+                      <textarea
+                        value={personalForm.carerNote}
+                        onChange={(e) => setPersonalForm((f) => ({ ...f, carerNote: e.target.value }))}
+                        rows={3}
+                      />
+                    </label>
+                  </div>
+                  <div className="people-personal-actions">
+                    <button type="submit" className="btn-solid">
+                      Save
+                    </button>
+                    <button type="button" className="btn-ghost" onClick={() => setPersonalEditOpen(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                renderTableRows(
+                  [
+                    { label: "Preferred name", value: personalOverrides.preferredName ?? profileData.preferredName },
+                    { label: "First name", value: personalOverrides.firstName ?? profileData.firstName },
+                    { label: "Last name", value: personalOverrides.lastName ?? profileData.lastName },
+                    { label: "Gender", value: personalOverrides.gender ?? profileData.gender },
+                    {
+                      label: "Date of birth",
+                      value:
+                        (personalOverrides.dateOfBirth || profileData.dateOfBirth) &&
+                        `${personalOverrides.dateOfBirth || formatLongDate(profileData.dateOfBirth)}`
+                    },
+                    { label: "Marital status", value: personalOverrides.maritalStatus ?? profileData.maritalStatus },
+                    { label: "Birthplace", value: personalOverrides.birthplace ?? profileData.birthplace },
+                    { label: "Nationality", value: personalOverrides.nationality ?? profileData.nationality },
+                    {
+                      label: "Languages spoken",
+                      value: (personalOverrides.languages || profileData.languages).filter(Boolean).join(", ")
+                    },
+                    { label: "Ethnicity", value: personalOverrides.ethnicity ?? profileData.ethnicity },
+                    { label: "Religion", value: personalOverrides.religion ?? profileData.religion },
+                    {
+                      label: "Carer gender preference",
+                      value: personalOverrides.carerGenderPreference ?? profileData.carerGenderPreference
+                    },
+                    { label: "Carer note", value: personalOverrides.carerNote ?? profileData.carerNote }
+                  ].filter((row) => row.value && row.value.trim().length > 0)
+                )
+              )}
             </article>
 
-            <article className={`people-profile-card ${panelIs("general") ? "focus" : ""}`}>
+            <article ref={panelRefs.general} className={`people-profile-card ${panelIs("general") ? "focus" : ""}`}>
               <header>
                 <h2>Site related information</h2>
                 <button type="button" className="profile-edit-btn">
@@ -943,7 +1382,10 @@ export default function PeoplePage() {
               {renderTableRows(profileData.siteInfo)}
             </article>
 
-            <article className={`people-profile-card ${panelIs(["general", "charts"]) ? "focus" : ""}`}>
+            <article
+              ref={panelRefs.general}
+              className={`people-profile-card ${panelIs(["general", "charts"]) ? "focus" : ""}`}
+            >
               <header>
                 <h2>Contact details</h2>
                 <button type="button" className="profile-edit-btn">
@@ -954,7 +1396,10 @@ export default function PeoplePage() {
               {renderTableRows(profileData.contactInfo)}
             </article>
 
-            <article className={`people-profile-card span-2 ${panelIs("needs") ? "focus" : ""}`}>
+            <article
+              ref={panelRefs.needs}
+              className={`people-profile-card span-2 ${panelIs("needs") ? "focus" : ""}`}
+            >
               <header>
                 <h2>Care related information</h2>
                 <button type="button" className="profile-edit-btn">
@@ -965,26 +1410,91 @@ export default function PeoplePage() {
               {renderTableRows(profileData.careInfo)}
             </article>
 
-            <article className={`people-profile-card ${panelIs("important") ? "focus" : ""}`}>
+            <article ref={panelRefs.important} className={`people-profile-card ${panelIs("important") ? "focus" : ""}`}>
               <header>
                 <h2>Important people</h2>
-                <button type="button" className="profile-edit-btn">
-                  <EditIcon />
-                  Edit
-                </button>
+                <div className="people-important-actions">
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={() => setShowContactForm((open) => !open)}
+                    aria-expanded={showContactForm}
+                  >
+                    {showContactForm ? "Close" : "Add contact"}
+                  </button>
+                </div>
               </header>
+
+              {showContactForm ? (
+                <form className="people-contact-form" onSubmit={addImportantContact}>
+                  <div className="people-contact-form-grid">
+                    <label>
+                      <span>Name</span>
+                      <input
+                        type="text"
+                        value={newContact.name}
+                        onChange={(event) => setNewContact((c) => ({ ...c, name: event.target.value }))}
+                        required
+                      />
+                    </label>
+                    <label>
+                      <span>Role</span>
+                      <input
+                        type="text"
+                        value={newContact.role}
+                        onChange={(event) => setNewContact((c) => ({ ...c, role: event.target.value }))}
+                        placeholder="Family, OT, GP..."
+                      />
+                    </label>
+                    <label>
+                      <span>Phone</span>
+                      <input
+                        type="text"
+                        value={newContact.phone}
+                        onChange={(event) => setNewContact((c) => ({ ...c, phone: event.target.value }))}
+                        placeholder="+44 ..."
+                      />
+                    </label>
+                    <label>
+                      <span>Relationship</span>
+                      <select
+                        value={newContact.relation}
+                        onChange={(event) =>
+                          setNewContact((c) => ({ ...c, relation: event.target.value as ImportantContact["relation"] }))
+                        }
+                      >
+                        <option value="Personal">Personal</option>
+                        <option value="Professional">Professional</option>
+                        <option value="Clinical">Clinical</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="people-contact-form-actions">
+                    <button type="submit" className="btn-solid">
+                      Save contact
+                    </button>
+                    <button type="button" className="btn-ghost" onClick={() => setShowContactForm(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : null}
+
               <ul className="people-profile-contact-list">
-                {profileData.importantPeople.map((contact) => (
-                  <li key={`${contact.name}-${contact.role}`}>
+                {importantContacts.map((contact) => (
+                  <li key={`${contact.name}-${contact.role}-${contact.phone}`}>
+                    <div className="people-contact-pill">
+                      <span className="contact-relation">{contact.relation || "Personal"}</span>
+                    </div>
                     <strong>{contact.name}</strong>
-                    <span>{contact.role}</span>
-                    <small>{contact.phone}</small>
+                    <span>{contact.role || "—"}</span>
+                    <small>{contact.phone || "No phone added"}</small>
                   </li>
                 ))}
               </ul>
             </article>
 
-            <article className={`people-profile-card ${panelIs("about") ? "focus" : ""}`}>
+            <article ref={panelRefs.about} className={`people-profile-card ${panelIs("about") ? "focus" : ""}`}>
               <header>
                 <h2>About me</h2>
                 <button type="button" className="profile-edit-btn">
@@ -995,7 +1505,7 @@ export default function PeoplePage() {
               <p className="people-profile-note">{profileData.aboutMe}</p>
             </article>
 
-            <article className={`people-profile-card ${panelIs("future") ? "focus" : ""}`}>
+            <article ref={panelRefs.future} className={`people-profile-card ${panelIs("future") ? "focus" : ""}`}>
               <header>
                 <h2>Future plans</h2>
                 <button type="button" className="profile-edit-btn">
@@ -1006,42 +1516,109 @@ export default function PeoplePage() {
               <p className="people-profile-note">{profileData.futurePlans}</p>
             </article>
 
-            <article className={`people-profile-card ${panelIs("logs") ? "focus" : ""}`}>
+            <article ref={panelRefs.logs} className={`people-profile-card ${panelIs("logs") ? "focus" : ""}`}>
               <header>
                 <h2>Daily logs</h2>
               </header>
               {renderBulletList(profileData.dailyLogs)}
             </article>
 
-            <article className={`people-profile-card ${panelIs("charts") ? "focus" : ""}`}>
+            <article ref={panelRefs.charts} className={`people-profile-card ${panelIs("charts") ? "focus" : ""}`}>
               <header>
                 <h2>Charts</h2>
               </header>
               {renderBulletList(profileData.charts)}
             </article>
 
-            <article className={`people-profile-card ${panelIs("documents") ? "focus" : ""}`}>
-              <header>
-                <h2>Documents</h2>
+            <article ref={panelRefs.documents} className={`people-profile-card ${panelIs("documents") ? "focus" : ""}`}>
+              <header className="people-docs-header">
+                <div>
+                  <h2>Documents</h2>
+                  <p className="summary-copy">View existing files or upload new supporting documents.</p>
+                </div>
+                <div className="people-docs-actions">
+                  <button type="button" className="btn-outline" onClick={() => setShowDocForm(false)}>
+                    View documents
+                  </button>
+                  <button type="button" className="btn-solid" onClick={() => setShowDocForm(true)}>
+                    Upload new
+                  </button>
+                </div>
               </header>
-              {renderBulletList(profileData.documents)}
+
+              {showDocForm ? (
+                <form className="people-doc-form" onSubmit={addDocument}>
+                  <div className="people-doc-form-grid">
+                    <label>
+                      <span>Document title</span>
+                      <input
+                        type="text"
+                        value={newDocTitle}
+                        onChange={(event) => setNewDocTitle(event.target.value)}
+                        placeholder="Enter a title"
+                        required
+                      />
+                    </label>
+                    <label>
+                      <span>Category</span>
+                      <select value={newDocCategory} onChange={(event) => setNewDocCategory(event.target.value)}>
+                        {documentCategories.map((category) => (
+                          <option key={category} value={category}>
+                            {category}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="upload-placeholder">
+                      <span>File</span>
+                      <div className="upload-faux-field">Select file (mock)</div>
+                    </label>
+                  </div>
+                  <div className="people-doc-form-actions">
+                    <button type="submit" className="btn-solid">
+                      Save document
+                    </button>
+                    <button type="button" className="btn-ghost" onClick={() => setShowDocForm(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <ul className="people-doc-list">
+                  {documents.map((doc) => (
+                    <li key={doc.id}>
+                      <div>
+                        <strong>{doc.title}</strong>
+                        <small>{doc.category}</small>
+                      </div>
+                      <span className="muted">{doc.updated}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </article>
 
-            <article className={`people-profile-card ${panelIs("carePlanning") ? "focus" : ""}`}>
+            <article
+              ref={panelRefs.carePlanning}
+              className={`people-profile-card ${panelIs("carePlanning") ? "focus" : ""}`}
+            >
               <header>
                 <h2>Care planning</h2>
               </header>
               {renderBulletList(profileData.carePlanning)}
             </article>
 
-            <article className={`people-profile-card ${panelIs("medication") ? "focus" : ""}`}>
+            <article
+              ref={panelRefs.medication}
+              className={`people-profile-card ${panelIs("medication") ? "focus" : ""}`}
+            >
               <header>
                 <h2>Medication</h2>
               </header>
               {renderBulletList(profileData.medication)}
             </article>
 
-            <article className={`people-profile-card ${panelIs("consent") ? "focus" : ""}`}>
+            <article ref={panelRefs.consent} className={`people-profile-card ${panelIs("consent") ? "focus" : ""}`}>
               <header>
                 <h2>Consent</h2>
               </header>

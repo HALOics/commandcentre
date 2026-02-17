@@ -7,6 +7,7 @@ import PlaceholderPage from "./pages/PlaceholderPage";
 import PeoplePage from "./pages/PeoplePage";
 import SettingsPage from "./pages/SettingsPage";
 import TeamPage from "./pages/TeamPage";
+import SubscriptionsPage from "./pages/SubscriptionsPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { navigation } from "./navigation";
 
@@ -28,6 +29,7 @@ export default function App() {
             <Route path="/people" element={<PeoplePage />} />
             <Route path="/people/:serviceUserId" element={<PeoplePage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/subscriptions" element={<SubscriptionsPage />} />
             <Route path="/team" element={<TeamPage />} />
             {uniqueNavigationRoutes
               .filter(
@@ -35,6 +37,7 @@ export default function App() {
                   item.href !== "/" &&
                   item.href !== "/people" &&
                   item.href !== "/settings" &&
+                  item.href !== "/subscriptions" &&
                   item.href !== "/team" &&
                   item.href !== "/messenger"
               )

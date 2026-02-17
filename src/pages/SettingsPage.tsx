@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMsal } from "@azure/msal-react";
 import {
+  AccessibilityPreferences,
+  TextScaleOption,
+  applyAccessibilityPreferences,
+  readAccessibilityPreferences,
+  textScaleOptions,
+  writeAccessibilityPreferences
+} from "../accessibility/preferences";
+import {
   DashboardPreferences,
   WidgetId,
   WidgetSize,
@@ -36,6 +44,10 @@ export default function SettingsPage() {
   const [hidden, setHidden] = useState<WidgetId[]>([]);
   const [sizes, setSizes] = useState<Record<WidgetId, WidgetSize>>(defaultWidgetSizes);
   const [widgetsOpen, setWidgetsOpen] = useState(false);
+  const [accessibilityOpen, setAccessibilityOpen] = useState(false);
+  const [accessibilityPreferences, setAccessibilityPreferences] = useState<AccessibilityPreferences>(
+    () => readAccessibilityPreferences()
+  );
   const [draggedWidget, setDraggedWidget] = useState<WidgetId | null>(null);
   const [dropTarget, setDropTarget] = useState<WidgetId | null>(null);
 
@@ -75,6 +87,11 @@ export default function SettingsPage() {
     localStorage.setItem(storageKey, JSON.stringify(preferences));
   }, [hidden, order, sizes, storageKey]);
 
+  useEffect(() => {
+    applyAccessibilityPreferences(accessibilityPreferences);
+    writeAccessibilityPreferences(accessibilityPreferences);
+  }, [accessibilityPreferences]);
+
   function toggleWidget(id: WidgetId): void {
     if (isWidgetLocked(id)) {
       return;
@@ -93,6 +110,14 @@ export default function SettingsPage() {
     setOrder(defaultWidgetOrder);
     setHidden([]);
     setSizes(defaultWidgetSizes);
+  }
+
+  function updateColorblindMode(enabled: boolean): void {
+    setAccessibilityPreferences((current) => ({ ...current, colorblindMode: enabled }));
+  }
+
+  function updateTextScale(nextScale: TextScaleOption): void {
+    setAccessibilityPreferences((current) => ({ ...current, textScale: nextScale }));
   }
 
   return (
@@ -248,6 +273,64 @@ export default function SettingsPage() {
               <button className="btn-outline" onClick={resetLayout}>
                 Reset to default
               </button>
+            </div>
+          </>
+        ) : null}
+      </article>
+
+      <article className="settings-panel">
+        <button
+          className={`settings-section-btn ${accessibilityOpen ? "active" : ""}`}
+          onClick={() => setAccessibilityOpen((current) => !current)}
+          aria-expanded={accessibilityOpen}
+        >
+          Accessibility
+          <span>{accessibilityOpen ? "Collapse" : "Open"}</span>
+        </button>
+
+        {!accessibilityOpen ? (
+          <p className="settings-collapsed-copy">Manage colourblind mode and global text scaling preferences.</p>
+        ) : null}
+
+        {accessibilityOpen ? (
+          <>
+            <p className="settings-panel-copy">Adjust visual accessibility options for this HALO workspace.</p>
+
+            <div className="settings-accessibility-grid">
+              <label className="settings-accessibility-row" htmlFor="colorblind-mode-toggle">
+                <div className="settings-accessibility-copy">
+                  <strong>Colourblind Mode</strong>
+                  <p>Uses colour-safe alert and status tones across widgets, cards, and indicators.</p>
+                </div>
+                <input
+                  id="colorblind-mode-toggle"
+                  type="checkbox"
+                  checked={accessibilityPreferences.colorblindMode}
+                  onChange={(event) => updateColorblindMode(event.target.checked)}
+                />
+              </label>
+
+              <div className="settings-accessibility-row settings-accessibility-text-row">
+                <div className="settings-accessibility-copy">
+                  <strong>Text Size</strong>
+                  <p>Scale global text for easier reading while preserving the premium layout.</p>
+                </div>
+                <label className="settings-size-field settings-text-size-field" htmlFor="text-size-scale-select">
+                  <span>Scale</span>
+                  <select
+                    id="text-size-scale-select"
+                    className="input-field settings-size-select settings-text-size-select"
+                    value={accessibilityPreferences.textScale}
+                    onChange={(event) => updateTextScale(event.target.value as TextScaleOption)}
+                  >
+                    {textScaleOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label} ({option.note})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             </div>
           </>
         ) : null}
