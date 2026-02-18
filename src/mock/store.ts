@@ -2,7 +2,7 @@ import usersData from "./data/users.json";
 import serviceUsersData from "./data/serviceUsers.json";
 import rotaTemplatesData from "./data/rota.json";
 
-export type TeamUserRole = "Carer" | "Admin" | "Senior Carer" | "Safeguarding Officer";
+export type TeamUserRole = "Carer" | "Admin" | "Senior Carer" | "Safeguarding Officer" | "Line Manager";
 export type TeamUserStatus = "active" | "inactive";
 
 export type TeamUser = {
