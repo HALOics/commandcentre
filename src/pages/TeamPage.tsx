@@ -1,112 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { loadTeamUsers } from "../data/dbClient";
+import { mockTeamUsers, type TeamUser } from "../mock/store";
 
-type MemberStatus = "active" | "inactive";
+type MemberStatus = TeamUser["status"];
 
-type TeamMember = {
-  id: string;
-  name: string;
-  role: "Carer" | "Admin" | "Senior Carer" | "Safeguarding Officer";
-  status: MemberStatus;
-  lineManager: string;
-  email: string;
-  phone: string;
-};
-
-const roleOptions: TeamMember["role"][] = ["Carer", "Admin", "Senior Carer", "Safeguarding Officer"];
-
-const mockTeamMembers: TeamMember[] = [
-  {
-    id: "tm-001",
-    name: "Aster Cole",
-    role: "Carer",
-    status: "active",
-    lineManager: "S. Patel",
-    email: "aster.cole@halo.mock",
-    phone: "+44 20 7000 1101"
-  },
-  {
-    id: "tm-002",
-    name: "Briar Lane",
-    role: "Carer",
-    status: "active",
-    lineManager: "S. Patel",
-    email: "briar.lane@halo.mock",
-    phone: "+44 20 7000 1102"
-  },
-  {
-    id: "tm-003",
-    name: "Corin Miles",
-    role: "Senior Carer",
-    status: "active",
-    lineManager: "L. Mercer",
-    email: "corin.miles@halo.mock",
-    phone: "+44 20 7000 1103"
-  },
-  {
-    id: "tm-004",
-    name: "Demi Harlow",
-    role: "Carer",
-    status: "inactive",
-    lineManager: "S. Patel",
-    email: "demi.harlow@halo.mock",
-    phone: "+44 20 7000 1104"
-  },
-  {
-    id: "tm-005",
-    name: "Evan Price",
-    role: "Admin",
-    status: "active",
-    lineManager: "R. Collins",
-    email: "evan.price@halo.mock",
-    phone: "+44 20 7000 1105"
-  },
-  {
-    id: "tm-006",
-    name: "Finley Shah",
-    role: "Carer",
-    status: "active",
-    lineManager: "L. Mercer",
-    email: "finley.shah@halo.mock",
-    phone: "+44 20 7000 1106"
-  },
-  {
-    id: "tm-007",
-    name: "Gia Patel",
-    role: "Safeguarding Officer",
-    status: "active",
-    lineManager: "R. Collins",
-    email: "gia.patel@halo.mock",
-    phone: "+44 20 7000 1107"
-  },
-  {
-    id: "tm-008",
-    name: "Harper Quinn",
-    role: "Senior Carer",
-    status: "inactive",
-    lineManager: "L. Mercer",
-    email: "harper.quinn@halo.mock",
-    phone: "+44 20 7000 1108"
-  },
-  {
-    id: "tm-009",
-    name: "Indra Moss",
-    role: "Carer",
-    status: "active",
-    lineManager: "S. Patel",
-    email: "indra.moss@halo.mock",
-    phone: "+44 20 7000 1109"
-  },
-  {
-    id: "tm-010",
-    name: "Jules Novak",
-    role: "Carer",
-    status: "active",
-    lineManager: "L. Mercer",
-    email: "jules.novak@halo.mock",
-    phone: "+44 20 7000 1110"
-  }
-];
+const roleOptions: TeamUser["role"][] = ["Carer", "Admin", "Senior Carer", "Safeguarding Officer"];
 
 function ChevronIcon({ open }: { open: boolean }) {
   return (
@@ -208,37 +107,52 @@ function getInitials(name: string): string {
 }
 
 export default function TeamPage() {
+  const [teamMembers, setTeamMembers] = useState<TeamUser[]>(mockTeamUsers);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilters, setStatusFilters] = useState<MemberStatus[]>(["active"]);
-  const [roleFilters, setRoleFilters] = useState<TeamMember["role"][]>([]);
+  const [roleFilters, setRoleFilters] = useState<TeamUser["role"][]>([]);
   const [lineManagerFilters, setLineManagerFilters] = useState<string[]>([]);
   const [statusOpen, setStatusOpen] = useState(true);
   const [roleOpen, setRoleOpen] = useState(true);
   const [lineManagerOpen, setLineManagerOpen] = useState(true);
 
+  useEffect(() => {
+    let isCancelled = false;
+
+    loadTeamUsers().then((users) => {
+      if (!isCancelled) {
+        setTeamMembers(users);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
   const lineManagerOptions = useMemo(
-    () => Array.from(new Set(mockTeamMembers.map((member) => member.lineManager))).sort(),
-    []
+    () => Array.from(new Set(teamMembers.map((member) => member.lineManager))).sort(),
+    [teamMembers]
   );
 
   const activeCount = useMemo(
-    () => mockTeamMembers.filter((member) => member.status === "active").length,
-    []
+    () => teamMembers.filter((member) => member.status === "active").length,
+    [teamMembers]
   );
   const inactiveCount = useMemo(
-    () => mockTeamMembers.filter((member) => member.status === "inactive").length,
-    []
+    () => teamMembers.filter((member) => member.status === "inactive").length,
+    [teamMembers]
   );
   const specialistCount = useMemo(
     () =>
-      mockTeamMembers.filter(
+      teamMembers.filter(
         (member) => member.role === "Senior Carer" || member.role === "Safeguarding Officer"
       ).length,
-    []
+    [teamMembers]
   );
 
   const filteredMembers = useMemo(() => {
-    return mockTeamMembers.filter((member) => {
+    return teamMembers.filter((member) => {
       const query = searchQuery.trim().toLowerCase();
       const matchesQuery =
         query.length === 0 ||
@@ -252,7 +166,7 @@ export default function TeamPage() {
       const matchesLineManager = lineManagerFilters.length === 0 || lineManagerFilters.includes(member.lineManager);
       return matchesQuery && matchesStatus && matchesRole && matchesLineManager;
     });
-  }, [lineManagerFilters, roleFilters, searchQuery, statusFilters]);
+  }, [lineManagerFilters, roleFilters, searchQuery, statusFilters, teamMembers]);
 
   function toggleStatusFilter(nextStatus: MemberStatus): void {
     setStatusFilters((current) =>
@@ -260,7 +174,7 @@ export default function TeamPage() {
     );
   }
 
-  function toggleRoleFilter(nextRole: TeamMember["role"]): void {
+  function toggleRoleFilter(nextRole: TeamUser["role"]): void {
     setRoleFilters((current) => (current.includes(nextRole) ? current.filter((role) => role !== nextRole) : [...current, nextRole]));
   }
 
@@ -299,7 +213,7 @@ export default function TeamPage() {
       <div className="team-summary-grid" aria-label="Team overview">
         <article className="team-summary-card">
           <p>Total members</p>
-          <strong>{mockTeamMembers.length}</strong>
+          <strong>{teamMembers.length}</strong>
           <span>Across all registered teams</span>
         </article>
         <article className="team-summary-card">
