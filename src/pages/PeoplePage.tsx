@@ -5,11 +5,15 @@ import moodGoodIcon from "../assets/moods/mood_good.png";
 import moodNeutralIcon from "../assets/moods/mood_neutral.png";
 import moodLowIcon from "../assets/moods/mood_low.png";
 import moodLowestIcon from "../assets/moods/mood_lowest.png";
+import { loadServiceUsers } from "../data/dbClient";
+import {
+  mockServiceUsers,
+  type MoodLevel,
+  type ServiceUser,
+  type UserFlag,
+  type UserStatus
+} from "../mock/store";
 
-type UserStatus = "active" | "inactive" | "hospitalised" | "discharged";
-type UserFlag = "Allergy" | "Review due" | "Behaviour support" | "Medication watch";
-type SupportTier = "Enhanced" | "Standard" | "Light";
-type MoodLevel = "great" | "good" | "ok" | "low" | "critical";
 type ProfilePanelId =
   | "general"
   | "needs"
@@ -22,20 +26,6 @@ type ProfilePanelId =
   | "carePlanning"
   | "medication"
   | "consent";
-
-type ServiceUser = {
-  id: string;
-  name: string;
-  status: UserStatus;
-  zone: string;
-  unit: string;
-  keyWorker: string;
-  supportTier: SupportTier;
-  lastCheckIn: string;
-  mood: MoodLevel;
-  moodUpdated: string;
-  flags: UserFlag[];
-};
 
 type ProfileField = {
   label: string;
@@ -94,165 +84,6 @@ type ServiceUserProfileData = {
   medication: string[];
   consent: string[];
 };
-
-const mockServiceUsers: ServiceUser[] = [
-  {
-    id: "su-001",
-    name: "Arden Finch",
-    status: "active",
-    zone: "Maple",
-    unit: "Maple-4",
-    keyWorker: "T. Quinn",
-    supportTier: "Enhanced",
-    lastCheckIn: "08:14",
-    mood: "great",
-    moodUpdated: "09:08",
-    flags: ["Allergy", "Medication watch"]
-  },
-  {
-    id: "su-002",
-    name: "Blaire Mason",
-    status: "active",
-    zone: "Harbor",
-    unit: "Harbor-2",
-    keyWorker: "R. Lang",
-    supportTier: "Standard",
-    lastCheckIn: "07:52",
-    mood: "good",
-    moodUpdated: "08:37",
-    flags: []
-  },
-  {
-    id: "su-003",
-    name: "Cairo Wells",
-    status: "hospitalised",
-    zone: "Cedar",
-    unit: "Cedar-1",
-    keyWorker: "N. Ellis",
-    supportTier: "Enhanced",
-    lastCheckIn: "Yesterday",
-    mood: "low",
-    moodUpdated: "Yesterday 18:20",
-    flags: ["Review due"]
-  },
-  {
-    id: "su-004",
-    name: "Delaney Price",
-    status: "active",
-    zone: "Orchard",
-    unit: "Orchard-7",
-    keyWorker: "A. Reed",
-    supportTier: "Light",
-    lastCheckIn: "09:06",
-    mood: "ok",
-    moodUpdated: "09:14",
-    flags: ["Behaviour support"]
-  },
-  {
-    id: "su-005",
-    name: "Elliot Shore",
-    status: "active",
-    zone: "Maple",
-    unit: "Maple-1",
-    keyWorker: "S. Ives",
-    supportTier: "Standard",
-    lastCheckIn: "08:48",
-    mood: "good",
-    moodUpdated: "08:55",
-    flags: []
-  },
-  {
-    id: "su-006",
-    name: "Frankie Vale",
-    status: "inactive",
-    zone: "Orbit",
-    unit: "Orbit-3",
-    keyWorker: "J. Hale",
-    supportTier: "Light",
-    lastCheckIn: "2 days ago",
-    mood: "ok",
-    moodUpdated: "2 days ago",
-    flags: []
-  },
-  {
-    id: "su-007",
-    name: "Gray Monroe",
-    status: "active",
-    zone: "Harbor",
-    unit: "Harbor-5",
-    keyWorker: "P. North",
-    supportTier: "Enhanced",
-    lastCheckIn: "08:31",
-    mood: "great",
-    moodUpdated: "08:44",
-    flags: ["Allergy"]
-  },
-  {
-    id: "su-008",
-    name: "Harper Sloan",
-    status: "discharged",
-    zone: "Cedar",
-    unit: "Cedar-4",
-    keyWorker: "M. Pike",
-    supportTier: "Standard",
-    lastCheckIn: "Last week",
-    mood: "critical",
-    moodUpdated: "6 days ago",
-    flags: []
-  },
-  {
-    id: "su-009",
-    name: "Indigo Hart",
-    status: "active",
-    zone: "Orbit",
-    unit: "Orbit-1",
-    keyWorker: "C. Bloom",
-    supportTier: "Enhanced",
-    lastCheckIn: "09:22",
-    mood: "low",
-    moodUpdated: "09:27",
-    flags: ["Review due", "Medication watch"]
-  },
-  {
-    id: "su-010",
-    name: "Jules Carter",
-    status: "active",
-    zone: "Orchard",
-    unit: "Orchard-2",
-    keyWorker: "D. Flynn",
-    supportTier: "Light",
-    lastCheckIn: "08:02",
-    mood: "good",
-    moodUpdated: "08:11",
-    flags: []
-  },
-  {
-    id: "su-011",
-    name: "Kieran West",
-    status: "active",
-    zone: "Maple",
-    unit: "Maple-6",
-    keyWorker: "V. Mercer",
-    supportTier: "Standard",
-    lastCheckIn: "07:41",
-    mood: "ok",
-    moodUpdated: "08:05",
-    flags: ["Behaviour support"]
-  },
-  {
-    id: "su-012",
-    name: "Lennox Briggs",
-    status: "inactive",
-    zone: "Harbor",
-    unit: "Harbor-1",
-    keyWorker: "F. Nolan",
-    supportTier: "Standard",
-    lastCheckIn: "3 days ago",
-    mood: "low",
-    moodUpdated: "3 days ago",
-    flags: ["Review due"]
-  }
-];
 
 const statusOptions: Array<{ id: UserStatus; label: string }> = [
   { id: "active", label: "Active" },
@@ -619,8 +450,8 @@ function makePhone(index: number, seed: number): string {
   return `+44 20 7000 ${lastDigits}`;
 }
 
-function buildProfileData(serviceUser: ServiceUser): ServiceUserProfileData {
-  const index = Math.max(0, mockServiceUsers.findIndex((entry) => entry.id === serviceUser.id));
+function buildProfileData(serviceUser: ServiceUser, serviceUsers: ServiceUser[]): ServiceUserProfileData {
+  const index = Math.max(0, serviceUsers.findIndex((entry) => entry.id === serviceUser.id));
   const dateOfBirth = seedAt(dateOfBirthSeeds, index);
   const age = getAge(dateOfBirth);
   const gender = seedAt(genderSeeds, index);
@@ -809,6 +640,7 @@ export default function PeoplePage() {
   const navigate = useNavigate();
   const { serviceUserId } = useParams<{ serviceUserId?: string }>();
 
+  const [serviceUsers, setServiceUsers] = useState<ServiceUser[]>(mockServiceUsers);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilters, setStatusFilters] = useState<UserStatus[]>(["active"]);
   const [zoneFilters, setZoneFilters] = useState<string[]>([]);
@@ -861,22 +693,36 @@ export default function PeoplePage() {
   };
 
   useEffect(() => {
+    let isCancelled = false;
+
+    loadServiceUsers().then((users) => {
+      if (!isCancelled) {
+        setServiceUsers(users);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     setActiveProfilePanel("general");
   }, [serviceUserId]);
 
   const selectedServiceUser = useMemo(
-    () => (serviceUserId ? mockServiceUsers.find((entry) => entry.id === serviceUserId) ?? null : null),
-    [serviceUserId]
+    () => (serviceUserId ? serviceUsers.find((entry) => entry.id === serviceUserId) ?? null : null),
+    [serviceUserId, serviceUsers]
   );
 
   const selectedUserIndex = useMemo(
-    () => (selectedServiceUser ? Math.max(0, mockServiceUsers.findIndex((entry) => entry.id === selectedServiceUser.id)) : 0),
-    [selectedServiceUser]
+    () => (selectedServiceUser ? Math.max(0, serviceUsers.findIndex((entry) => entry.id === selectedServiceUser.id)) : 0),
+    [selectedServiceUser, serviceUsers]
   );
 
   const profileData = useMemo(
-    () => (selectedServiceUser ? buildProfileData(selectedServiceUser) : null),
-    [selectedServiceUser]
+    () => (selectedServiceUser ? buildProfileData(selectedServiceUser, serviceUsers) : null),
+    [selectedServiceUser, serviceUsers]
   );
 
   useEffect(() => {
@@ -915,26 +761,26 @@ export default function PeoplePage() {
   }, [profileData, serviceUserId]);
 
   const zoneOptions = useMemo(
-    () => Array.from(new Set(mockServiceUsers.map((serviceUser) => serviceUser.zone))).sort(),
-    []
+    () => Array.from(new Set(serviceUsers.map((serviceUser) => serviceUser.zone))).sort(),
+    [serviceUsers]
   );
 
   const statusCounts = useMemo(
     () =>
-      mockServiceUsers.reduce<Record<UserStatus, number>>(
+      serviceUsers.reduce<Record<UserStatus, number>>(
         (countMap, serviceUser) => {
           countMap[serviceUser.status] += 1;
           return countMap;
         },
         { active: 0, inactive: 0, hospitalised: 0, discharged: 0 }
       ),
-    []
+    [serviceUsers]
   );
 
   const filteredUsers = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
 
-    return mockServiceUsers.filter((serviceUser) => {
+    return serviceUsers.filter((serviceUser) => {
       const matchesSearch =
         normalizedQuery.length === 0 ||
         serviceUser.name.toLowerCase().includes(normalizedQuery) ||
@@ -948,12 +794,12 @@ export default function PeoplePage() {
 
       return matchesSearch && matchesStatus && matchesZone && matchesFlags;
     });
-  }, [flagFilters, searchQuery, statusFilters, zoneFilters]);
+  }, [flagFilters, searchQuery, serviceUsers, statusFilters, zoneFilters]);
 
   const activeCount = statusCounts.active;
   const flaggedCount = useMemo(
-    () => mockServiceUsers.filter((serviceUser) => serviceUser.flags.length > 0).length,
-    []
+    () => serviceUsers.filter((serviceUser) => serviceUser.flags.length > 0).length,
+    [serviceUsers]
   );
   const zoneCoverageCount = zoneOptions.length;
 
