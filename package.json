@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:data-gates": "BASE_URL=http://127.0.0.1:5173 ./scripts/check-data-gates.sh"
   },
   "dependencies": {
     "@halo/hub-db": "file:../../dev/hub-db",
