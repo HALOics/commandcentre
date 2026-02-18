@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@halo/hub-db": "file:../../dev/hub-db",
     "@azure/msal-browser": "^3.20.0",
     "@azure/msal-react": "^2.0.21",
     "react": "^18.3.1",

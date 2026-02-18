@@ -1,0 +1,93 @@
+[
+  {
+    "id": "rs-001",
+    "dayOffset": 0,
+    "start": "08:00",
+    "end": "16:00",
+    "location": "North Team",
+    "type": "Background",
+    "status": "Assigned",
+    "employeeId": "tm-001",
+    "serviceUserId": null,
+    "comments": "Morning coverage and handover",
+    "colorCode": "#3b82f6"
+  },
+  {
+    "id": "rs-002",
+    "dayOffset": 1,
+    "start": "09:00",
+    "end": "17:00",
+    "location": "South Team",
+    "type": "PWS",
+    "status": "Assigned",
+    "employeeId": "tm-002",
+    "serviceUserId": "su-002",
+    "comments": "Community activity support",
+    "colorCode": "#8b5cf6"
+  },
+  {
+    "id": "rs-003",
+    "dayOffset": 2,
+    "start": "10:00",
+    "end": "18:00",
+    "location": "Central Team",
+    "type": "PWS",
+    "status": "Assigned",
+    "employeeId": "tm-003",
+    "serviceUserId": "su-003",
+    "comments": "Appointment escort",
+    "colorCode": "#8b5cf6"
+  },
+  {
+    "id": "rs-004",
+    "dayOffset": 3,
+    "start": "07:30",
+    "end": "15:30",
+    "location": "North Team",
+    "type": "PWS",
+    "status": "Assigned",
+    "employeeId": "tm-004",
+    "serviceUserId": "su-001",
+    "comments": "Morning routine and shopping",
+    "colorCode": "#8b5cf6"
+  },
+  {
+    "id": "rs-005",
+    "dayOffset": 4,
+    "start": "11:00",
+    "end": "19:00",
+    "location": "South Team",
+    "type": "Background",
+    "status": "Assigned",
+    "employeeId": "tm-005",
+    "serviceUserId": null,
+    "comments": "Late shift cover",
+    "colorCode": "#3b82f6"
+  },
+  {
+    "id": "rs-006",
+    "dayOffset": 5,
+    "start": "09:00",
+    "end": "13:00",
+    "location": "North Team",
+    "type": "PWS",
+    "status": "Assigned",
+    "employeeId": "tm-001",
+    "serviceUserId": "su-001",
+    "comments": "Weekend support",
+    "colorCode": "#8b5cf6"
+  },
+  {
+    "id": "rs-007",
+    "dayOffset": 6,
+    "start": "12:00",
+    "end": "18:00",
+    "location": "South Team",
+    "type": "Background",
+    "status": "Assigned",
+    "employeeId": "tm-002",
+    "serviceUserId": null,
+    "comments": "Sunday handover",
+    "colorCode": "#3b82f6"
+  }
+]
