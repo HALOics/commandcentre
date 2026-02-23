@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import { navigation } from "../navigation";
+import { logoutAppSession } from "../auth/appSession";
 import { setDevAuthenticated } from "../auth/devAuth";
 import {
   MESSENGER_UNREAD_EVENT,
@@ -69,16 +70,6 @@ export default function Layout() {
   const idleLogoutTriggeredRef = useRef(false);
 
   const account = useMemo(() => instance.getActiveAccount() ?? accounts[0], [accounts, instance]);
-  const displayName = account?.name || account?.username || "HALO Operator";
-  const role = "Admin";
-  const company = account?.username?.split("@")[1] || "halo.local";
-
-  const initials = displayName
-    .split(" ")
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
 
   useEffect(() => {
     const savedTheme = (localStorage.getItem("halo_theme") as Theme | null) || "light";
@@ -123,6 +114,7 @@ export default function Layout() {
 
   const logout = useCallback(async (reason: "manual" | "idle" = "manual") => {
     setDevAuthenticated(false);
+    await logoutAppSession();
 
     if (!account) {
       window.location.assign("/login");
@@ -274,15 +266,6 @@ export default function Layout() {
             {theme === "dark" ? <SunIcon /> : <MoonIcon />}
           </button>
 
-          <button className="user-profile-btn" onClick={() => void logout("manual")} title="Sign out">
-            <div className="user-avatar">{initials}</div>
-            <div className="user-copy">
-              <strong>{displayName}</strong>
-              <span>
-                {role} at {company}
-              </span>
-            </div>
-          </button>
         </div>
       </header>
 

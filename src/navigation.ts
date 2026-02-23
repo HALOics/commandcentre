@@ -41,8 +41,9 @@ export const navigation: NavigationItem[] = [
     ],
     disabled: true
   },
-  { name: "Rota", href: "/rota", disabled: true },
+  { name: "Rota", href: "/rota" },
   { name: "Reports", href: "/reports", disabled: true },
   { name: "Subscription", href: "/subscriptions", disabled: true },
-  { name: "Settings", href: "/settings" }
+  { name: "Settings", href: "/settings" },
+  { name: "About", href: "/about" }
 ];

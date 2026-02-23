@@ -1,15 +1,132 @@
 [
-  { "id": "tm-001", "name": "Aster Cole", "role": "Carer", "status": "active", "active": true, "lineManager": "S. Patel", "email": "aster.cole@halo.mock", "phone": "+44 20 7000 1101" },
-  { "id": "tm-002", "name": "Briar Lane", "role": "Carer", "status": "active", "active": true, "lineManager": "S. Patel", "email": "briar.lane@halo.mock", "phone": "+44 20 7000 1102" },
-  { "id": "tm-003", "name": "Corin Miles", "role": "Senior Carer", "status": "active", "active": true, "lineManager": "L. Mercer", "email": "corin.miles@halo.mock", "phone": "+44 20 7000 1103" },
-  { "id": "tm-004", "name": "Demi Harlow", "role": "Carer", "status": "inactive", "active": false, "lineManager": "S. Patel", "email": "demi.harlow@halo.mock", "phone": "+44 20 7000 1104" },
-  { "id": "tm-005", "name": "Evan Price", "role": "Admin", "status": "active", "active": true, "lineManager": "R. Collins", "email": "evan.price@halo.mock", "phone": "+44 20 7000 1105" },
-  { "id": "tm-006", "name": "Finley Shah", "role": "Carer", "status": "active", "active": true, "lineManager": "L. Mercer", "email": "finley.shah@halo.mock", "phone": "+44 20 7000 1106" },
-  { "id": "tm-007", "name": "Gia Patel", "role": "Safeguarding Officer", "status": "active", "active": true, "lineManager": "R. Collins", "email": "gia.patel@halo.mock", "phone": "+44 20 7000 1107" },
-  { "id": "tm-008", "name": "Harper Quinn", "role": "Senior Carer", "status": "inactive", "active": false, "lineManager": "L. Mercer", "email": "harper.quinn@halo.mock", "phone": "+44 20 7000 1108" },
-  { "id": "tm-009", "name": "Indra Moss", "role": "Carer", "status": "active", "active": true, "lineManager": "S. Patel", "email": "indra.moss@halo.mock", "phone": "+44 20 7000 1109" },
-  { "id": "tm-010", "name": "Jules Novak", "role": "Carer", "status": "active", "active": true, "lineManager": "L. Mercer", "email": "jules.novak@halo.mock", "phone": "+44 20 7000 1110" },
-  { "id": "tm-011", "name": "Shilpa Patel", "role": "Line Manager", "status": "active", "active": true, "lineManager": "R. Collins", "email": "shilpa.patel@halo.mock", "phone": "+44 20 7000 1111" },
-  { "id": "tm-012", "name": "Leah Mercer", "role": "Line Manager", "status": "active", "active": true, "lineManager": "R. Collins", "email": "leah.mercer@halo.mock", "phone": "+44 20 7000 1112" },
-  { "id": "tm-013", "name": "Rian Collins", "role": "Line Manager", "status": "active", "active": true, "lineManager": "R. Collins", "email": "rian.collins@halo.mock", "phone": "+44 20 7000 1113" }
+  {
+    "id": "tm-001",
+    "name": "Aster Cole",
+    "email": "aster.cole@halo.mock",
+    "phone": "+44 20 7000 1101",
+    "role": "Carer",
+    "status": "active",
+    "lineManager": "Shilpa Patel",
+    "isLineManager": false
+  },
+  {
+    "id": "tm-002",
+    "name": "Briar Lane",
+    "email": "briar.lane@halo.mock",
+    "phone": "+44 20 7000 1102",
+    "role": "Carer",
+    "status": "active",
+    "lineManager": "Shilpa Patel",
+    "isLineManager": false
+  },
+  {
+    "id": "tm-003",
+    "name": "Corin Miles",
+    "email": "corin.miles@halo.mock",
+    "phone": "+44 20 7000 1103",
+    "role": "Senior Carer",
+    "status": "active",
+    "lineManager": "Leah Mercer",
+    "isLineManager": false
+  },
+  {
+    "id": "tm-004",
+    "name": "Demi Harlow",
+    "email": "demi.harlow@halo.mock",
+    "phone": "+44 20 7000 1104",
+    "role": "Carer",
+    "status": "inactive",
+    "lineManager": "Shilpa Patel",
+    "isLineManager": false
+  },
+  {
+    "id": "tm-005",
+    "name": "Evan Price",
+    "email": "evan.price@halo.mock",
+    "phone": "+44 20 7000 1105",
+    "role": "Admin",
+    "status": "active",
+    "lineManager": "Rian Collins",
+    "isLineManager": false
+  },
+  {
+    "id": "tm-006",
+    "name": "Finley Shah",
+    "email": "finley.shah@halo.mock",
+    "phone": "+44 20 7000 1106",
+    "role": "Carer",
+    "status": "active",
+    "lineManager": "Leah Mercer",
+    "isLineManager": false
+  },
+  {
+    "id": "tm-007",
+    "name": "Gia Patel",
+    "email": "gia.patel@halo.mock",
+    "phone": "+44 20 7000 1107",
+    "role": "Safeguarding Officer",
+    "status": "active",
+    "lineManager": "Rian Collins",
+    "isLineManager": false
+  },
+  {
+    "id": "tm-008",
+    "name": "Harper Quinn",
+    "email": "harper.quinn@halo.mock",
+    "phone": "+44 20 7000 1108",
+    "role": "Senior Carer",
+    "status": "inactive",
+    "lineManager": "Leah Mercer",
+    "isLineManager": false
+  },
+  {
+    "id": "tm-009",
+    "name": "Indra Moss",
+    "email": "indra.moss@halo.mock",
+    "phone": "+44 20 7000 1109",
+    "role": "Carer",
+    "status": "active",
+    "lineManager": "Shilpa Patel",
+    "isLineManager": false
+  },
+  {
+    "id": "tm-010",
+    "name": "Jules Novak",
+    "email": "jules.novak@halo.mock",
+    "phone": "+44 20 7000 1110",
+    "role": "Carer",
+    "status": "active",
+    "lineManager": "Leah Mercer",
+    "isLineManager": false
+  },
+  {
+    "id": "tm-011",
+    "name": "Shilpa Patel",
+    "email": "shilpa.patel@halo.mock",
+    "phone": "+44 20 7000 1111",
+    "role": "Line Manager",
+    "status": "active",
+    "lineManager": "Rian Collins",
+    "isLineManager": true
+  },
+  {
+    "id": "tm-012",
+    "name": "Leah Mercer",
+    "email": "leah.mercer@halo.mock",
+    "phone": "+44 20 7000 1112",
+    "role": "Line Manager",
+    "status": "active",
+    "lineManager": "Rian Collins",
+    "isLineManager": true
+  },
+  {
+    "id": "tm-013",
+    "name": "Rian Collins",
+    "email": "rian.collins@halo.mock",
+    "phone": "+44 20 7000 1113",
+    "role": "Head of Service",
+    "status": "active",
+    "lineManager": "Rian Collins",
+    "isLineManager": true
+  }
 ]

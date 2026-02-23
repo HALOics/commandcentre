@@ -5,11 +5,14 @@ import moodGoodIcon from "../assets/moods/mood_good.png";
 import moodNeutralIcon from "../assets/moods/mood_neutral.png";
 import moodLowIcon from "../assets/moods/mood_low.png";
 import moodLowestIcon from "../assets/moods/mood_lowest.png";
+import { getAppSessionToken } from "../auth/appSession";
+import { loadTeamUsers } from "../data/dbClient";
+import type { TeamUser } from "../mock/store";
 import { WidgetId, WidgetSize } from "./dashboardConfig";
 
 type MoodLevel = "best" | "good" | "neutral" | "low" | "lowest";
 type PeopleSortKey = "none" | "keyWorker" | "zone" | "recentMood";
-type TeamSortKey = "none" | "lineManager" | "zone";
+type TeamSortKey = "none" | "lineManager" | "role";
 
 type PersonCard = {
   name: string;
@@ -73,22 +76,14 @@ const supportFeedbackEntries = [
   { serviceUser: "Delta-07", rating: 3, comment: "Good visit overall, but arrival time was later than expected." }
 ];
 
-type TeamMember = {
-  name: string;
-  lineManager: string;
-  zone: string;
-};
-
-const teamMembers: TeamMember[] = [
-  { name: "Aster Cole", lineManager: "M. Orr", zone: "Maple" },
-  { name: "Briar Lane", lineManager: "M. Orr", zone: "Harbor" },
-  { name: "Corin Miles", lineManager: "S. Drew", zone: "Orbit" },
-  { name: "Evan Price", lineManager: "S. Drew", zone: "Maple" },
-  { name: "Finley Shah", lineManager: "J. Patel", zone: "Cedar" },
-  { name: "Gia Patel", lineManager: "J. Patel", zone: "Orchard" },
-  { name: "Hayden Ives", lineManager: "M. Orr", zone: "Harbor" },
-  { name: "Imani Reid", lineManager: "J. Patel", zone: "Orbit" }
-];
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+}
 
 function PeopleWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
   const [showMood, setShowMood] = useState<boolean>(() => {
@@ -234,11 +229,41 @@ function PeopleWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
 }
 
 function TeamWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
+  const [teamMembers, setTeamMembers] = useState<TeamUser[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    const token = getAppSessionToken();
+
+    if (!token) {
+      setTeamMembers([]);
+      setIsLoading(false);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    loadTeamUsers()
+      .then((users) => {
+        if (!isMounted) return;
+        setTeamMembers(users);
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setIsLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   if (size === "brief") {
     return (
       <div className="brief-block">
         <p className="summary-copy">
-          <strong>6</strong> team members online
+          <strong>{teamMembers.length}</strong> team members
         </p>
       </div>
     );
@@ -247,8 +272,10 @@ function TeamWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
   const [sortKey, setSortKey] = useState<TeamSortKey>("none");
   const [filterValue, setFilterValue] = useState<string>("all");
 
-  const lineManagerOptions = Array.from(new Set(teamMembers.map((m) => m.lineManager))).sort();
-  const zoneOptions = Array.from(new Set(teamMembers.map((m) => m.zone))).sort();
+  const lineManagerOptions = Array.from(
+    new Set(teamMembers.map((m) => m.lineManager).filter((value): value is string => Boolean(value)))
+  ).sort();
+  const zoneOptions = Array.from(new Set(teamMembers.map((m) => m.role).filter(Boolean))).sort();
 
   const sortedTeam = (() => {
     const base = size === "detailed" ? teamMembers : teamMembers.slice(0, 6);
@@ -258,15 +285,15 @@ function TeamWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
       list = list.filter((m) => m.lineManager === filterValue);
     }
 
-    if (sortKey === "zone" && filterValue !== "all") {
-      list = list.filter((m) => m.zone === filterValue);
+    if (sortKey === "role" && filterValue !== "all") {
+      list = list.filter((m) => m.role === filterValue);
     }
 
     switch (sortKey) {
       case "lineManager":
         return list.sort((a, b) => a.lineManager.localeCompare(b.lineManager) || a.name.localeCompare(b.name));
-      case "zone":
-        return list.sort((a, b) => a.zone.localeCompare(b.zone) || a.name.localeCompare(b.name));
+      case "role":
+        return list.sort((a, b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name));
       default:
         return list;
     }
@@ -287,7 +314,7 @@ function TeamWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
           >
             <option value="none">Show all</option>
             <option value="lineManager">Line manager</option>
-            <option value="zone">Zone</option>
+            <option value="role">Role</option>
           </select>
         </label>
 
@@ -305,14 +332,14 @@ function TeamWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
           </label>
         ) : null}
 
-        {sortKey === "zone" ? (
-          <label className="widget-select" aria-label="Filter by zone">
-            <span>Zone</span>
+        {sortKey === "role" ? (
+          <label className="widget-select" aria-label="Filter by role">
+            <span>Role</span>
             <select value={filterValue} onChange={(event) => setFilterValue(event.target.value)}>
               <option value="all">All</option>
-              {zoneOptions.map((zone) => (
-                <option key={zone} value={zone}>
-                  {zone}
+              {zoneOptions.map((role) => (
+                <option key={role} value={role}>
+                  {role}
                 </option>
               ))}
             </select>
@@ -320,10 +347,13 @@ function TeamWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
         ) : null}
       </div>
 
+      {isLoading ? <p className="summary-copy">Loading team data…</p> : null}
+      {!isLoading && sortedTeam.length === 0 ? <p className="summary-copy">No team members found for this company.</p> : null}
+
       <div className="avatar-grid compact">
         {sortedTeam.map((member) => (
-          <div key={member.name} className="avatar-chip">
-            <span>{member.name.slice(0, 2).toUpperCase()}</span>
+          <div key={member.id} className="avatar-chip">
+            <span>{getInitials(member.name)}</span>
             <small>{member.name}</small>
           </div>
         ))}

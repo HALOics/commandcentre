@@ -1,0 +1,277 @@
+.halo-rota-view {
+  --bg-card: var(--surface);
+  --bg-elevated: var(--surface-soft);
+  --bg-hover: color-mix(in srgb, var(--surface-soft) 72%, #ffffff 28%);
+  --border-subtle: var(--line);
+  --border-light: var(--line-strong);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-soft);
+  --text-muted: var(--text-mute);
+  --accent-orange: var(--brand-accent);
+  --shadow: rgba(24, 47, 94, 0.18);
+
+  display: grid;
+  gap: 16px;
+  color: var(--text-main);
+}
+
+.halo-rota-view .btn-primary,
+.halo-rota-view .btn-secondary {
+  font: inherit;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  padding: 9px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: transform 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.halo-rota-view .btn-primary {
+  background: linear-gradient(125deg, var(--brand-2), var(--brand-3));
+  color: #f6f8ff;
+  box-shadow: 0 8px 18px rgba(41, 19, 94, 0.24);
+}
+
+.halo-rota-view .btn-primary:hover {
+  transform: translateY(-1px);
+}
+
+.halo-rota-view .btn-secondary {
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border-color: var(--border-light);
+}
+
+.halo-rota-view .btn-secondary:hover {
+  background: var(--bg-elevated);
+}
+
+.halo-rota-view .input-field {
+  width: 100%;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.halo-rota-view .input-field:focus {
+  outline: 2px solid color-mix(in srgb, var(--brand-accent) 55%, transparent 45%);
+  border-color: var(--brand-accent);
+}
+
+.halo-rota-view .form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.halo-rota-view .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.halo-rota-view .form-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.halo-rota-view .modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(9, 15, 30, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 80;
+  padding: 16px;
+}
+
+.halo-rota-view .modal {
+  width: min(840px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  box-shadow: var(--shadow-lg);
+}
+
+.halo-rota-view .modal-header,
+.halo-rota-view .modal-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.halo-rota-view .modal-footer {
+  border-bottom: none;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.halo-rota-view .modal-body {
+  padding: 16px;
+}
+
+.halo-rota-view .modal-title {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.halo-rota-view .schedule-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.halo-rota-view .schedule-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.halo-rota-view .week-grid {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  overflow: auto;
+}
+
+.halo-rota-view .week-header,
+.halo-rota-view .employee-row {
+  min-width: 1160px;
+  display: grid;
+  grid-template-columns: 240px repeat(7, minmax(130px, 1fr));
+}
+
+.halo-rota-view .week-header {
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.halo-rota-view .week-day-header {
+  padding: 12px;
+  text-align: center;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.halo-rota-view .week-day-header.today {
+  background: color-mix(in srgb, var(--brand-accent) 10%, transparent 90%);
+}
+
+.halo-rota-view .employee-row {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.halo-rota-view .employee-cell {
+  padding: 12px;
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.halo-rota-view .shift-cell {
+  min-height: 118px;
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+}
+
+.halo-rota-view .shift-cell.today {
+  background: color-mix(in srgb, var(--brand-accent) 8%, transparent 92%);
+}
+
+.halo-rota-view .shift-card {
+  border-radius: 7px;
+  padding: 6px;
+}
+
+.halo-rota-view .shift-card-missed {
+  background: linear-gradient(140deg, #9ca3af, #6b7280);
+  color: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  opacity: 0.88;
+  box-shadow: none;
+  user-select: none;
+}
+
+.halo-rota-view .day-zone-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.halo-rota-view .day-zone-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.halo-rota-view .day-zone-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.halo-rota-view .day-zone-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.halo-rota-view .day-zone-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.halo-rota-view .day-zone-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.halo-rota-view .day-zone-empty {
+  padding: 12px;
+  border: 1px dashed var(--border-light);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 1180px) {
+  .halo-rota-view .day-zone-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .halo-rota-view .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .halo-rota-view .schedule-controls {
+    flex-wrap: wrap;
+  }
+
+  .halo-rota-view .modal {
+    width: 100%;
+  }
+}

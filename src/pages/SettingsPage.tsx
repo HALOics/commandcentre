@@ -8,6 +8,7 @@ import {
   textScaleOptions,
   writeAccessibilityPreferences
 } from "../accessibility/preferences";
+import { loadTeamRoles, saveTeamRoles } from "../data/dbClient";
 import {
   DashboardPreferences,
   WidgetId,
@@ -45,11 +46,14 @@ export default function SettingsPage() {
   const [sizes, setSizes] = useState<Record<WidgetId, WidgetSize>>(defaultWidgetSizes);
   const [widgetsOpen, setWidgetsOpen] = useState(false);
   const [accessibilityOpen, setAccessibilityOpen] = useState(false);
+  const [rolesOpen, setRolesOpen] = useState(false);
   const [accessibilityPreferences, setAccessibilityPreferences] = useState<AccessibilityPreferences>(
     () => readAccessibilityPreferences()
   );
   const [draggedWidget, setDraggedWidget] = useState<WidgetId | null>(null);
   const [dropTarget, setDropTarget] = useState<WidgetId | null>(null);
+  const [roles, setRoles] = useState<string[]>([]);
+  const [newRole, setNewRole] = useState("");
 
   const account = instance.getActiveAccount() ?? accounts[0];
   const accountKey = account?.homeAccountId || account?.username || "local";
@@ -91,6 +95,25 @@ export default function SettingsPage() {
     applyAccessibilityPreferences(accessibilityPreferences);
     writeAccessibilityPreferences(accessibilityPreferences);
   }, [accessibilityPreferences]);
+
+  useEffect(() => {
+    loadTeamRoles().then((list) => setRoles(list));
+  }, []);
+
+  function addRole() {
+    const role = newRole.trim();
+    if (!role) return;
+    const next = Array.from(new Set([...roles, role]));
+    setRoles(next);
+    saveTeamRoles(next);
+    setNewRole("");
+  }
+
+  function removeRole(role: string) {
+    const next = roles.filter((r) => r !== role);
+    setRoles(next);
+    saveTeamRoles(next);
+  }
 
   function toggleWidget(id: WidgetId): void {
     if (isWidgetLocked(id)) {
@@ -273,6 +296,56 @@ export default function SettingsPage() {
               <button className="btn-outline" onClick={resetLayout}>
                 Reset to default
               </button>
+            </div>
+          </>
+        ) : null}
+      </article>
+
+      <article className="settings-panel">
+        <button
+          className={`settings-section-btn ${rolesOpen ? "active" : ""}`}
+          onClick={() => setRolesOpen((current) => !current)}
+          aria-expanded={rolesOpen}
+        >
+          Job Roles
+          <span>{rolesOpen ? "Collapse" : "Open"}</span>
+        </button>
+
+        {!rolesOpen ? (
+          <p className="settings-collapsed-copy">Manage the list of roles available when editing a team member.</p>
+        ) : null}
+
+        {rolesOpen ? (
+          <>
+            <p className="settings-panel-copy">Add, remove, or rename job roles used across Team profiles.</p>
+            <div className="roles-editor">
+              <div className="roles-add-row">
+                <input
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value)}
+                  placeholder="Add a new role"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addRole();
+                    }
+                  }}
+                />
+                <button className="btn-primary" type="button" onClick={addRole}>
+                  Add
+                </button>
+              </div>
+              <div className="roles-pills">
+                {roles.map((role) => (
+                  <span key={role} className="role-pill">
+                    {role}
+                    <button type="button" aria-label={`Remove ${role}`} onClick={() => removeRole(role)}>
+                      ×
+                    </button>
+                  </span>
+                ))}
+                {roles.length === 0 ? <p className="settings-panel-copy">No roles yet.</p> : null}
+              </div>
             </div>
           </>
         ) : null}

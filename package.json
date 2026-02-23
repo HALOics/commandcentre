@@ -10,9 +10,10 @@
     "check:data-gates": "BASE_URL=http://127.0.0.1:5173 ./scripts/check-data-gates.sh"
   },
   "dependencies": {
-    "@halo/hub-db": "file:../../dev/hub-db",
     "@azure/msal-browser": "^3.20.0",
     "@azure/msal-react": "^2.0.21",
+    "@halo/hub-db": "file:../../dev/hub-db",
+    "mssql": "^12.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0"

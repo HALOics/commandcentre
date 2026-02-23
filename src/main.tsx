@@ -4,6 +4,7 @@ import { AuthenticationResult, EventMessage, EventType } from "@azure/msal-brows
 import App from "./App";
 import "./index.css";
 import { applyAccessibilityPreferences, readAccessibilityPreferences } from "./accessibility/preferences";
+import { validateStoredAppSession } from "./auth/appSession";
 import { msalInstance } from "./auth/msal";
 
 const rootElement = document.getElementById("root");
@@ -34,8 +35,14 @@ function renderApp(): void {
 
 msalInstance
   .initialize()
-  .then(() => {
-    setInitialAccount();
+  .then(async () => {
+    const redirectResult = await msalInstance.handleRedirectPromise();
+    if (redirectResult?.account) {
+      msalInstance.setActiveAccount(redirectResult.account);
+    } else {
+      setInitialAccount();
+    }
+    await validateStoredAppSession();
 
     msalInstance.addEventCallback((event: EventMessage) => {
       if (

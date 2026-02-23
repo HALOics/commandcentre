@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { loadTeamUsers } from "../data/dbClient";
 import { mockTeamUsers, type TeamUser } from "../mock/store";
 
@@ -86,10 +86,10 @@ function InviteIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path
-        d="M4 7h16v10H4z M4 8l8 5 8-5"
+        d="M12 4v16M4 12h16"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.8"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -107,6 +107,7 @@ function getInitials(name: string): string {
 }
 
 export default function TeamPage() {
+  const navigate = useNavigate();
   const [teamMembers, setTeamMembers] = useState<TeamUser[]>(mockTeamUsers);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilters, setStatusFilters] = useState<MemberStatus[]>(["active"]);
@@ -203,9 +204,13 @@ export default function TeamPage() {
             </button>
           </label>
 
-          <button type="button" className="btn-solid team-invite-btn">
+          <button
+            type="button"
+            className="btn-solid team-invite-btn"
+            onClick={() => navigate("/team/new")}
+          >
             <InviteIcon />
-            Invite a Team Member
+            Onboard a Team Member
           </button>
         </div>
       </header>
@@ -355,7 +360,19 @@ export default function TeamPage() {
           ) : (
             <ul className="team-member-list">
               {filteredMembers.map((member, index) => (
-                <li key={member.id} className="team-member-row">
+                <li
+                  key={member.id}
+                  className="team-member-row"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => navigate(`/team/${member.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      navigate(`/team/${member.id}`);
+                    }
+                  }}
+                >
                   <div className="team-member-main">
                     <div className={`team-avatar palette-${index % 6}`}>{getInitials(member.name)}</div>
                     <strong className="team-member-name">{member.name}</strong>

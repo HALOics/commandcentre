@@ -5,11 +5,15 @@ import LoginPage from "./pages/LoginPage";
 import MessengerPage from "./pages/MessengerPage";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import PeoplePage from "./pages/PeoplePage";
+import RotaPage from "./pages/RotaPage";
 import SettingsPage from "./pages/SettingsPage";
 import TeamPage from "./pages/TeamPage";
+import AboutPage from "./pages/AboutPage";
+import TeamMemberPage from "./pages/TeamMemberPage";
 import SubscriptionsPage from "./pages/SubscriptionsPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { navigation } from "./navigation";
+import { RotaDataProvider } from "./rota/RotaDataContext";
 
 export default function App() {
   const allNavigationRoutes = navigation.flatMap((item) => [item, ...(item.children ?? [])]);
@@ -23,14 +27,23 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
 
         <Route element={<ProtectedRoute />}>
-          <Route element={<Layout />}>
+          <Route
+            element={
+              <RotaDataProvider>
+                <Layout />
+              </RotaDataProvider>
+            }
+          >
             <Route index element={<DashboardPage />} />
             <Route path="/messenger" element={<MessengerPage />} />
             <Route path="/people" element={<PeoplePage />} />
             <Route path="/people/:serviceUserId" element={<PeoplePage />} />
+            <Route path="/rota" element={<RotaPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/subscriptions" element={<SubscriptionsPage />} />
             <Route path="/team" element={<TeamPage />} />
+            <Route path="/team/:teamId" element={<TeamMemberPage />} />
+            <Route path="/about" element={<AboutPage />} />
             {uniqueNavigationRoutes
               .filter(
                 (item) =>
@@ -39,7 +52,9 @@ export default function App() {
                   item.href !== "/settings" &&
                   item.href !== "/subscriptions" &&
                   item.href !== "/team" &&
-                  item.href !== "/messenger"
+                  item.href !== "/about" &&
+                  item.href !== "/messenger" &&
+                  item.href !== "/rota"
               )
               .map((item) => (
                 <Route key={item.href} path={item.href} element={<PlaceholderPage title={item.name} />} />
