@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import {
   clearAppSession,
@@ -13,6 +13,8 @@ import {
 import { isDevAuthenticated, setDevAuthenticated } from "../auth/devAuth";
 import haloLogo from "../assets/halo-logo.svg";
 import clientLogo from "../assets/client-logo.png";
+
+const POST_LOGIN_TARGET_KEY = "halo_post_login_target";
 
 function getDeviceFingerprint(): { fingerprint: string; label: string } {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown";
@@ -46,8 +48,18 @@ export default function LoginPage() {
   const [manualKey, setManualKey] = useState("");
   const [otpauthUri, setOtpauthUri] = useState("");
   const [totpCode, setTotpCode] = useState("");
+  const verifiedMagicTokenRef = useRef<string | null>(null);
+  const [, setSessionVersion] = useState(0);
+  const totpQrCodeUrl = useMemo(
+    () =>
+      otpauthUri
+        ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(otpauthUri)}`
+        : "",
+    [otpauthUri]
+  );
 
-  const targetPath = (location.state as { from?: string } | undefined)?.from || "/";
+  const targetPath =
+    (location.state as { from?: string } | undefined)?.from || localStorage.getItem(POST_LOGIN_TARGET_KEY) || "/";
 
   function getExchangeErrorMessage(rawError: unknown): string {
     const appError = rawError as AppSessionError;
@@ -65,14 +77,28 @@ export default function LoginPage() {
     if (appError?.status === 503) {
       return "Login service is temporarily unavailable (database unavailable).";
     }
+    if (appError?.status === 504) {
+      return detail || "Sign-in verification timed out. Please request a new link and try again.";
+    }
     return detail || "Unable to complete sign-in right now.";
   }
 
   useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "halo_app_session_token" || event.key === "halo_app_session_expires_at") {
+        setSessionVersion((value) => value + 1);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  useEffect(() => {
     const token = new URLSearchParams(location.search).get("magic_token");
-    if (!token || pending) return;
+    if (!token || verifiedMagicTokenRef.current === token) return;
 
     let cancelled = false;
+    verifiedMagicTokenRef.current = token;
     setPending(true);
     setError("");
     setInfo("Verifying sign-in link...");
@@ -86,6 +112,7 @@ export default function LoginPage() {
       })
       .catch((verifyError) => {
         if (cancelled) return;
+        verifiedMagicTokenRef.current = null;
         clearAppSession();
         setInfo("");
         setError(getExchangeErrorMessage(verifyError));
@@ -97,7 +124,7 @@ export default function LoginPage() {
     return () => {
       cancelled = true;
     };
-  }, [location.search, pending]);
+  }, [location.search]);
 
   async function handleEmailMagicLinkRequest() {
     if (pending) return;
@@ -166,6 +193,11 @@ export default function LoginPage() {
         return;
       }
 
+      try {
+        localStorage.removeItem(POST_LOGIN_TARGET_KEY);
+      } catch {
+        // ignore storage failures
+      }
       navigate(targetPath, { replace: true });
     } catch (loginError) {
       clearAppSession();
@@ -244,6 +276,11 @@ export default function LoginPage() {
                 {manualKey ? (
                   <div className="summary-copy">
                     Manual key: <strong>{manualKey}</strong>
+                  </div>
+                ) : null}
+                {totpQrCodeUrl ? (
+                  <div className="totp-qr-block">
+                    <img src={totpQrCodeUrl} alt="Authenticator QR code" width={180} height={180} />
                   </div>
                 ) : null}
                 {otpauthUri ? (

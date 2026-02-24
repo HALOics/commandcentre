@@ -259,6 +259,15 @@ type ServiceUserApiRow = {
   emergencyContactPhone: string | null;
   emergencyContactRelation: string | null;
   preferredContactMethod: string | null;
+  dnacpr: string | null;
+  dolsStatus: string | null;
+  allergies: string | null;
+  bloodType: string | null;
+  medicalHistory: string | null;
+  admissionDate: Date | null;
+  nationalInsurance: string | null;
+  preferredDrink: string | null;
+  prnMeds: string | null;
   keyWorkerName: string | null;
   clientType: string | null;
   riskLevel: string | null;
@@ -282,6 +291,15 @@ type CreateServiceUserInput = {
   gpDetails: string;
   riskLevel: string;
   fundingSource: string;
+  dnacpr: string;
+  dolsStatus: string;
+  allergies: string;
+  bloodType: string;
+  medicalHistory: string;
+  admissionDate: string;
+  nationalInsurance: string;
+  preferredDrink: string;
+  prnMeds: string;
   activeStatus: boolean;
   dischargeDate: string;
 };
@@ -303,6 +321,15 @@ type UpdateServiceUserInput = {
   gpDetails?: string;
   riskLevel?: string;
   fundingSource?: string;
+  dnacpr?: string;
+  dolsStatus?: string;
+  allergies?: string;
+  bloodType?: string;
+  medicalHistory?: string;
+  admissionDate?: string;
+  nationalInsurance?: string;
+  preferredDrink?: string;
+  prnMeds?: string;
   preferredName?: string;
   maritalStatus?: string;
   birthplace?: string;
@@ -340,6 +367,7 @@ type EmailLoginToken = {
 
 type PendingLoginChallenge = {
   challengeToken: string;
+  tokenHash: string;
   user: LoginUserRow;
   roles: string[];
   expiresAt: number;
@@ -382,6 +410,7 @@ const jwksCache = new Map<string, CryptoJsonWebKey & { kid?: string }>();
 let azureSqlPoolPromise: Promise<mssql.ConnectionPool> | null = null;
 let hasStaffAvatarColumnCache: boolean | null = null;
 let hasClientKeyWorkerColumnCache: boolean | null = null;
+let hasClientCareColumnsCache: boolean | null = null;
 
 function getAzureSqlConnectionString(): string {
   return readString(process.env.AZURE_SQL_CONNECTION_STRING || process.env.SQLSERVER_CONNECTION_STRING);
@@ -401,6 +430,35 @@ async function getAzureSqlPool(): Promise<mssql.ConnectionPool> {
   }
 
   return azureSqlPoolPromise;
+}
+
+type DbScope = {
+  companyId?: number;
+  isSuperAdmin?: boolean;
+};
+
+function withDbScope(sql: string, scope: DbScope = {}): string {
+  const superAdminValue = scope.isSuperAdmin ? '1' : 'NULL';
+  const companyValue = Number.isFinite(scope.companyId) ? '@__scopeCompanyId' : 'NULL';
+  return `
+    EXEC sp_set_session_context @key = N'IsSuperAdmin', @value = ${superAdminValue};
+    EXEC sp_set_session_context @key = N'CompanyID', @value = ${companyValue};
+    ${sql}
+  `;
+}
+
+function scopedRequest(target: mssql.ConnectionPool | mssql.Transaction, scope: DbScope = {}): mssql.Request {
+  const request = new mssql.Request(target);
+  if (Number.isFinite(scope.companyId)) {
+    request.input('__scopeCompanyId', mssql.Int, scope.companyId as number);
+  }
+  return request;
+}
+
+async function setTransactionCompanyScope(tx: mssql.Transaction, companyId: number): Promise<void> {
+  await scopedRequest(tx, { companyId }).query(
+    withDbScope('SELECT 1 AS ok;', { companyId })
+  );
 }
 
 async function hasStaffAvatarColumn(): Promise<boolean> {
@@ -433,6 +491,32 @@ async function hasClientKeyWorkerColumn(): Promise<boolean> {
 
   hasClientKeyWorkerColumnCache = Boolean(rows[0]?.hasColumn);
   return hasClientKeyWorkerColumnCache;
+}
+
+async function ensureClientCareColumns(): Promise<void> {
+  if (hasClientCareColumnsCache) return;
+  const pool = await getAzureSqlPool();
+  await pool.request().query(`
+    IF COL_LENGTH('People.Clients', 'DNACPR') IS NULL
+      ALTER TABLE People.Clients ADD DNACPR NVARCHAR(50) NULL;
+    IF COL_LENGTH('People.Clients', 'DoLSStatus') IS NULL
+      ALTER TABLE People.Clients ADD DoLSStatus NVARCHAR(100) NULL;
+    IF COL_LENGTH('People.Clients', 'Allergies') IS NULL
+      ALTER TABLE People.Clients ADD Allergies NVARCHAR(1000) NULL;
+    IF COL_LENGTH('People.Clients', 'BloodType') IS NULL
+      ALTER TABLE People.Clients ADD BloodType NVARCHAR(10) NULL;
+    IF COL_LENGTH('People.Clients', 'MedicalHistory') IS NULL
+      ALTER TABLE People.Clients ADD MedicalHistory NVARCHAR(2000) NULL;
+    IF COL_LENGTH('People.Clients', 'AdmissionDate') IS NULL
+      ALTER TABLE People.Clients ADD AdmissionDate DATE NULL;
+    IF COL_LENGTH('People.Clients', 'NationalInsurance') IS NULL
+      ALTER TABLE People.Clients ADD NationalInsurance NVARCHAR(20) NULL;
+    IF COL_LENGTH('People.Clients', 'PreferredDrink') IS NULL
+      ALTER TABLE People.Clients ADD PreferredDrink NVARCHAR(100) NULL;
+    IF COL_LENGTH('People.Clients', 'PrnMeds') IS NULL
+      ALTER TABLE People.Clients ADD PrnMeds NVARCHAR(500) NULL;
+  `);
+  hasClientCareColumnsCache = true;
 }
 
 function getTotpEncryptionKey(): Buffer {
@@ -794,9 +878,9 @@ async function findLoginUserByEmail(email: string): Promise<LoginUserRow | null>
 
   const pool = await getAzureSqlPool();
   const rows = (
-    await pool.request()
+    await scopedRequest(pool, { isSuperAdmin: true })
       .input('email', mssql.NVarChar(320), normalizedEmail)
-      .query<LoginUserRow>(`
+      .query<LoginUserRow>(withDbScope(`
         SELECT TOP 1
           ua.UserID AS userId,
           ua.CompanyID AS companyId,
@@ -813,7 +897,7 @@ async function findLoginUserByEmail(email: string): Promise<LoginUserRow | null>
         WHERE LOWER(ua.Username) = LOWER(@email)
           AND ISNULL(c.ActiveStatus, 1) = 1
           AND ISNULL(ua.AccountStatus, N'Active') = N'Active'
-      `)
+      `, { isSuperAdmin: true }))
   ).recordset;
 
   return rows[0] ?? null;
@@ -823,11 +907,11 @@ async function getUserTotpSecret(userId: number): Promise<string | null> {
   await ensureAuthSecurityTables();
   const pool = await getAzureSqlPool();
   const rows = (
-    await pool.request().input('userId', mssql.Int, userId).query<{ secret: string; enabled: boolean }>(`
+    await scopedRequest(pool, { isSuperAdmin: true }).input('userId', mssql.Int, userId).query<{ secret: string; enabled: boolean }>(withDbScope(`
       SELECT TOP 1 TotpSecretEncrypted AS secret, Enabled AS enabled
       FROM Auth.UserMfa
       WHERE UserID = @userId
-    `)
+    `, { isSuperAdmin: true }))
   ).recordset;
 
   const entry = rows[0];
@@ -839,10 +923,10 @@ async function setUserTotpSecret(userId: number, secretBase32: string): Promise<
   await ensureAuthSecurityTables();
   const encrypted = encryptTotpSecret(secretBase32);
   const pool = await getAzureSqlPool();
-  await pool.request()
+  await scopedRequest(pool, { isSuperAdmin: true })
     .input('userId', mssql.Int, userId)
     .input('secret', mssql.NVarChar(512), encrypted)
-    .query(`
+    .query(withDbScope(`
       IF EXISTS (SELECT 1 FROM Auth.UserMfa WHERE UserID = @userId)
       BEGIN
         UPDATE Auth.UserMfa
@@ -856,7 +940,7 @@ async function setUserTotpSecret(userId: number, secretBase32: string): Promise<
         INSERT INTO Auth.UserMfa (UserID, TotpSecretEncrypted, Enabled, CreatedDate, ModifiedDate)
         VALUES (@userId, @secret, 1, SYSUTCDATETIME(), SYSUTCDATETIME())
       END
-    `);
+    `, { isSuperAdmin: true }));
 }
 
 function hashDeviceFingerprint(rawFingerprint: string): string {
@@ -872,17 +956,17 @@ async function getOrCreateUserDevice(params: {
   await ensureAuthSecurityTables();
   const pool = await getAzureSqlPool();
   const existing = (
-    await pool.request()
+    await scopedRequest(pool, { companyId: params.companyId })
       .input('userId', mssql.Int, params.userId)
       .input('companyId', mssql.Int, params.companyId)
       .input('fingerprintHash', mssql.Char(64), params.fingerprintHash)
-      .query<{ deviceId: string; status: string }>(`
+      .query<{ deviceId: string; status: string }>(withDbScope(`
         SELECT TOP 1 CAST(DeviceID AS NVARCHAR(36)) AS deviceId, Status AS status
         FROM Auth.UserDevice
         WHERE UserID = @userId
           AND CompanyID = @companyId
           AND FingerprintHash = @fingerprintHash
-      `)
+      `, { companyId: params.companyId }))
   ).recordset[0];
 
   if (existing) {
@@ -890,12 +974,12 @@ async function getOrCreateUserDevice(params: {
   }
 
   const created = (
-    await pool.request()
+    await scopedRequest(pool, { companyId: params.companyId })
       .input('userId', mssql.Int, params.userId)
       .input('companyId', mssql.Int, params.companyId)
       .input('fingerprintHash', mssql.Char(64), params.fingerprintHash)
       .input('deviceLabel', mssql.NVarChar(200), params.deviceLabel || 'Unknown device')
-      .query<{ deviceId: string; status: string }>(`
+      .query<{ deviceId: string; status: string }>(withDbScope(`
         INSERT INTO Auth.UserDevice (
           UserID,
           CompanyID,
@@ -913,20 +997,21 @@ async function getOrCreateUserDevice(params: {
           N'Pending',
           SYSUTCDATETIME()
         )
-      `)
+      `, { companyId: params.companyId }))
   ).recordset[0];
 
   return created;
 }
 
-async function markDeviceLastSeen(deviceId: string): Promise<void> {
+async function markDeviceLastSeen(deviceId: string, companyId?: number): Promise<void> {
   await ensureAuthSecurityTables();
   const pool = await getAzureSqlPool();
-  await pool.request().input('deviceId', mssql.UniqueIdentifier, deviceId).query(`
+  await scopedRequest(pool, companyId ? { companyId } : { isSuperAdmin: true })
+    .input('deviceId', mssql.UniqueIdentifier, deviceId).query(withDbScope(`
     UPDATE Auth.UserDevice
     SET LastSeenAt = SYSUTCDATETIME()
     WHERE DeviceID = @deviceId
-  `);
+  `, companyId ? { companyId } : { isSuperAdmin: true }));
 }
 
 function isAdminRole(roles: string[]): boolean {
@@ -940,7 +1025,7 @@ async function listPendingDevices(companyId: number): Promise<PendingDeviceRow[]
   await ensureAuthSecurityTables();
   const pool = await getAzureSqlPool();
   const rows = (
-    await pool.request().input('companyId', mssql.Int, companyId).query<PendingDeviceRow>(`
+    await scopedRequest(pool, { companyId }).input('companyId', mssql.Int, companyId).query<PendingDeviceRow>(withDbScope(`
       SELECT
         CAST(d.DeviceID AS NVARCHAR(36)) AS deviceId,
         d.UserID AS userId,
@@ -961,7 +1046,7 @@ async function listPendingDevices(companyId: number): Promise<PendingDeviceRow[]
       WHERE d.CompanyID = @companyId
         AND d.Status = N'Pending'
       ORDER BY d.RequestedAt DESC
-    `)
+    `, { companyId }))
   ).recordset;
   return rows;
 }
@@ -974,28 +1059,28 @@ async function setDeviceStatus(
 ): Promise<void> {
   await ensureAuthSecurityTables();
   const pool = await getAzureSqlPool();
-  await pool.request()
+  await scopedRequest(pool, { companyId })
     .input('companyId', mssql.Int, companyId)
     .input('deviceId', mssql.UniqueIdentifier, deviceId)
     .input('adminUserId', mssql.Int, adminUserId)
     .input('status', mssql.NVarChar(20), status)
-    .query(`
+    .query(withDbScope(`
       UPDATE Auth.UserDevice
       SET Status = @status,
           ApprovedByUserID = @adminUserId,
           ApprovedAt = SYSUTCDATETIME()
       WHERE CompanyID = @companyId
         AND DeviceID = @deviceId
-    `);
+    `, { companyId }));
 }
 
 async function loadUserRoles(userId: number, companyId: number): Promise<string[]> {
   const pool = await getAzureSqlPool();
   const rolesRows = (
-    await pool.request()
+    await scopedRequest(pool, { companyId })
       .input('userId', mssql.Int, userId)
       .input('companyId', mssql.Int, companyId)
-      .query<{ roleName: string }>(`
+      .query<{ roleName: string }>(withDbScope(`
         SELECT ur.RoleName AS roleName
         FROM Auth.UserRoleAssignment ura
         INNER JOIN Auth.UserRole ur
@@ -1005,10 +1090,38 @@ async function loadUserRoles(userId: number, companyId: number): Promise<string[
           AND ura.CompanyID = @companyId
           AND (ura.ExpiryDate IS NULL OR ura.ExpiryDate >= CAST(SYSUTCDATETIME() AS date))
           AND ISNULL(ur.IsActive, 1) = 1
-      `)
+      `, { companyId }))
   ).recordset;
 
   return uniqueSorted(rolesRows.map((role) => readString(role.roleName)));
+}
+
+async function companyHasActiveAdmin(companyId: number): Promise<boolean> {
+  const pool = await getAzureSqlPool();
+  const rows = (
+    await scopedRequest(pool, { companyId })
+      .input('companyId', mssql.Int, companyId)
+      .query<{ hasAdmin: number }>(withDbScope(`
+        SELECT TOP 1 CAST(1 AS INT) AS hasAdmin
+        FROM Auth.UserRoleAssignment ura
+        INNER JOIN Auth.UserRole ur
+          ON ur.RoleID = ura.RoleID
+         AND ur.CompanyID = ura.CompanyID
+        INNER JOIN Auth.UserAccount ua
+          ON ua.UserID = ura.UserID
+         AND ua.CompanyID = ura.CompanyID
+        WHERE ura.CompanyID = @companyId
+          AND (ura.ExpiryDate IS NULL OR ura.ExpiryDate >= CAST(SYSUTCDATETIME() AS date))
+          AND ISNULL(ur.IsActive, 1) = 1
+          AND ISNULL(ua.AccountStatus, N'Active') = N'Active'
+          AND (
+            LOWER(ur.RoleName) LIKE N'%admin%'
+            OR LOWER(ur.RoleName) LIKE N'%manager%'
+          )
+      `, { companyId }))
+  ).recordset;
+
+  return Boolean(rows[0]?.hasAdmin);
 }
 
 function issueSession(user: LoginUserRow, roles: string[]): ExchangeResult {
@@ -1117,13 +1230,12 @@ async function verifyMagicLink(token: string): Promise<MagicVerifyResult> {
     throw Object.assign(new Error('Magic link is invalid or expired.'), { code: 'AUTH_MAGIC_INVALID' });
   }
   const roles = await loadUserRoles(user.userId, user.companyId);
-  entry.usedAt = Date.now();
-  emailLoginTokens.delete(tokenHash);
   removeExpiredChallenges();
   const challengeToken = randomUUID();
   const expiresAt = Date.now() + LOGIN_CHALLENGE_TTL_MS;
   pendingLoginChallenges.set(challengeToken, {
     challengeToken,
+    tokenHash,
     user,
     roles,
     expiresAt
@@ -1201,10 +1313,21 @@ async function completeMagicLogin(params: {
   });
 
   if (device.status !== 'Approved') {
-    return { pendingApproval: true };
+    const hasAdmin = await companyHasActiveAdmin(challenge.user.companyId);
+    if (!hasAdmin) {
+      // Bootstrap path: if no admin exists for this company yet, allow first-device approval.
+      await setDeviceStatus(challenge.user.companyId, device.deviceId, challenge.user.userId, 'Approved');
+    } else {
+      return { pendingApproval: true };
+    }
   }
 
-  await markDeviceLastSeen(device.deviceId);
+  await markDeviceLastSeen(device.deviceId, challenge.user.companyId);
+  const tokenEntry = emailLoginTokens.get(challenge.tokenHash);
+  if (tokenEntry) {
+    tokenEntry.usedAt = Date.now();
+    emailLoginTokens.delete(challenge.tokenHash);
+  }
   pendingLoginChallenges.delete(params.challengeToken);
   return { session: issueSession(challenge.user, challenge.roles) };
 }
@@ -1243,6 +1366,15 @@ function sanitizeCreateServiceUserBody(body: Record<string, unknown>): CreateSer
     gpDetails: readString(body.gpDetails),
     riskLevel: readString(body.riskLevel),
     fundingSource: readString(body.fundingSource),
+    dnacpr: readString(body.dnacpr),
+    dolsStatus: readString(body.dolsStatus),
+    allergies: readString(body.allergies),
+    bloodType: readString(body.bloodType),
+    medicalHistory: readString(body.medicalHistory),
+    admissionDate: readString(body.admissionDate),
+    nationalInsurance: readString(body.nationalInsurance),
+    preferredDrink: readString(body.preferredDrink),
+    prnMeds: readString(body.prnMeds),
     activeStatus,
     dischargeDate: readString(body.dischargeDate)
   };
@@ -1274,6 +1406,15 @@ function sanitizeUpdateServiceUserBody(body: Record<string, unknown>): UpdateSer
   if ('gpDetails' in body) payload.gpDetails = readString(body.gpDetails);
   if ('riskLevel' in body) payload.riskLevel = readString(body.riskLevel);
   if ('fundingSource' in body) payload.fundingSource = readString(body.fundingSource);
+  if ('dnacpr' in body) payload.dnacpr = readString(body.dnacpr);
+  if ('dolsStatus' in body) payload.dolsStatus = readString(body.dolsStatus);
+  if ('allergies' in body) payload.allergies = readString(body.allergies);
+  if ('bloodType' in body) payload.bloodType = readString(body.bloodType);
+  if ('medicalHistory' in body) payload.medicalHistory = readString(body.medicalHistory);
+  if ('admissionDate' in body) payload.admissionDate = readString(body.admissionDate);
+  if ('nationalInsurance' in body) payload.nationalInsurance = readString(body.nationalInsurance);
+  if ('preferredDrink' in body) payload.preferredDrink = readString(body.preferredDrink);
+  if ('prnMeds' in body) payload.prnMeds = readString(body.prnMeds);
   if ('preferredName' in body) payload.preferredName = readString(body.preferredName);
   if ('maritalStatus' in body) payload.maritalStatus = readString(body.maritalStatus);
   if ('birthplace' in body) payload.birthplace = readString(body.birthplace);
@@ -1357,21 +1498,31 @@ function mapServiceUserRow(row: ServiceUserApiRow) {
     emergencyContactPhone: readString(row.emergencyContactPhone),
     emergencyContactRelation: readString(row.emergencyContactRelation),
     preferredContactMethod: readString(row.preferredContactMethod),
+    dnacpr: readString(row.dnacpr),
+    dolsStatus: readString(row.dolsStatus),
+    allergies: readString(row.allergies),
+    bloodType: readString(row.bloodType),
+    medicalHistory: readString(row.medicalHistory),
+    admissionDate: row.admissionDate ? row.admissionDate.toISOString().slice(0, 10) : '',
+    nationalInsurance: readString(row.nationalInsurance),
+    preferredDrink: readString(row.preferredDrink),
+    prnMeds: readString(row.prnMeds),
     activeStatus: Boolean(row.activeStatus),
     dischargeDate: row.dischargeDate ? row.dischargeDate.toISOString().slice(0, 10) : ''
   };
 }
 
 async function loadCompanyServiceUsers(companyId: number) {
+  await ensureClientCareColumns();
   const pool = await getAzureSqlPool();
   const hasKeyWorker = await hasClientKeyWorkerColumn();
   const keyWorkerSelect = hasKeyWorker
     ? `c.KeyWorkerName AS keyWorkerName,`
     : `CAST(NULL AS NVARCHAR(200)) AS keyWorkerName,`;
   const rows = (
-    await pool.request()
+    await scopedRequest(pool, { companyId })
       .input('companyId', mssql.Int, companyId)
-      .query<ServiceUserApiRow>(`
+      .query<ServiceUserApiRow>(withDbScope(`
         SELECT
           c.ClientID AS clientId,
           c.FirstName AS firstName,
@@ -1397,6 +1548,15 @@ async function loadCompanyServiceUsers(companyId: number) {
           c.EmergencyContactPhone AS emergencyContactPhone,
           c.EmergencyContactRelation AS emergencyContactRelation,
           c.PreferredContactMethod AS preferredContactMethod,
+          c.DNACPR AS dnacpr,
+          c.DoLSStatus AS dolsStatus,
+          c.Allergies AS allergies,
+          c.BloodType AS bloodType,
+          c.MedicalHistory AS medicalHistory,
+          c.AdmissionDate AS admissionDate,
+          c.NationalInsurance AS nationalInsurance,
+          c.PreferredDrink AS preferredDrink,
+          c.PrnMeds AS prnMeds,
           ${keyWorkerSelect}
           c.ClientType AS clientType,
           c.RiskLevel AS riskLevel,
@@ -1407,7 +1567,7 @@ async function loadCompanyServiceUsers(companyId: number) {
         FROM People.Clients c
         WHERE c.CompanyID = @companyId
         ORDER BY c.ModifiedDate DESC, c.ClientID DESC
-      `)
+      `, { companyId }))
   ).recordset;
 
   return rows.map(mapServiceUserRow);
@@ -1418,8 +1578,9 @@ async function createCompanyServiceUser(companyId: number, payload: CreateServic
     throw Object.assign(new Error('First name and last name are required'), { code: 'VALIDATION_ERROR' });
   }
 
+  await ensureClientCareColumns();
   const pool = await getAzureSqlPool();
-  const request = pool.request()
+  const request = scopedRequest(pool, { companyId })
     .input('companyId', mssql.Int, companyId)
     .input('clientType', mssql.NVarChar(50), payload.clientType || 'Community')
     .input('firstName', mssql.NVarChar(100), payload.firstName)
@@ -1434,11 +1595,20 @@ async function createCompanyServiceUser(companyId: number, payload: CreateServic
     .input('gpDetails', mssql.NVarChar(500), payload.gpDetails || '')
     .input('riskLevel', mssql.NVarChar(50), payload.riskLevel || 'Low')
     .input('fundingSource', mssql.NVarChar(100), payload.fundingSource || '')
+    .input('dnacpr', mssql.NVarChar(50), payload.dnacpr || '')
+    .input('dolsStatus', mssql.NVarChar(100), payload.dolsStatus || '')
+    .input('allergies', mssql.NVarChar(1000), payload.allergies || '')
+    .input('bloodType', mssql.NVarChar(10), payload.bloodType || '')
+    .input('medicalHistory', mssql.NVarChar(2000), payload.medicalHistory || '')
+    .input('admissionDate', mssql.Date, payload.admissionDate || null)
+    .input('nationalInsurance', mssql.NVarChar(20), payload.nationalInsurance || '')
+    .input('preferredDrink', mssql.NVarChar(100), payload.preferredDrink || '')
+    .input('prnMeds', mssql.NVarChar(500), payload.prnMeds || '')
     .input('activeStatus', mssql.Bit, payload.activeStatus ? 1 : 0)
     .input('dischargeDate', mssql.Date, payload.dischargeDate || null);
 
   const insertedRows = (
-    await request.query<{ clientId: number }>(`
+    await request.query<{ clientId: number }>(withDbScope(`
       INSERT INTO People.Clients (
         CompanyID,
         ClientType,
@@ -1454,6 +1624,15 @@ async function createCompanyServiceUser(companyId: number, payload: CreateServic
         GP_Details,
         RiskLevel,
         FundingSource,
+        DNACPR,
+        DoLSStatus,
+        Allergies,
+        BloodType,
+        MedicalHistory,
+        AdmissionDate,
+        NationalInsurance,
+        PreferredDrink,
+        PrnMeds,
         ActiveStatus,
         DischargeDate,
         CreatedDate,
@@ -1474,13 +1653,22 @@ async function createCompanyServiceUser(companyId: number, payload: CreateServic
         @gpDetails,
         @riskLevel,
         @fundingSource,
+        @dnacpr,
+        @dolsStatus,
+        @allergies,
+        @bloodType,
+        @medicalHistory,
+        @admissionDate,
+        @nationalInsurance,
+        @preferredDrink,
+        @prnMeds,
         @activeStatus,
         @dischargeDate,
         SYSUTCDATETIME(),
         SYSUTCDATETIME()
       );
       SELECT CAST(SCOPE_IDENTITY() AS INT) AS clientId;
-    `)
+    `, { companyId }))
   ).recordset;
 
   const clientId = insertedRows[0]?.clientId;
@@ -1493,10 +1681,10 @@ async function createCompanyServiceUser(companyId: number, payload: CreateServic
     ? `c.KeyWorkerName AS keyWorkerName,`
     : `CAST(NULL AS NVARCHAR(200)) AS keyWorkerName,`;
   const createdRows = (
-    await pool.request()
+    await scopedRequest(pool, { companyId })
       .input('companyId', mssql.Int, companyId)
       .input('clientId', mssql.Int, clientId)
-      .query<ServiceUserApiRow>(`
+      .query<ServiceUserApiRow>(withDbScope(`
         SELECT
           c.ClientID AS clientId,
           c.FirstName AS firstName,
@@ -1522,6 +1710,15 @@ async function createCompanyServiceUser(companyId: number, payload: CreateServic
           c.EmergencyContactPhone AS emergencyContactPhone,
           c.EmergencyContactRelation AS emergencyContactRelation,
           c.PreferredContactMethod AS preferredContactMethod,
+          c.DNACPR AS dnacpr,
+          c.DoLSStatus AS dolsStatus,
+          c.Allergies AS allergies,
+          c.BloodType AS bloodType,
+          c.MedicalHistory AS medicalHistory,
+          c.AdmissionDate AS admissionDate,
+          c.NationalInsurance AS nationalInsurance,
+          c.PreferredDrink AS preferredDrink,
+          c.PrnMeds AS prnMeds,
           ${keyWorkerSelect}
           c.ClientType AS clientType,
           c.RiskLevel AS riskLevel,
@@ -1532,7 +1729,7 @@ async function createCompanyServiceUser(companyId: number, payload: CreateServic
         FROM People.Clients c
         WHERE c.CompanyID = @companyId
           AND c.ClientID = @clientId
-      `)
+      `, { companyId }))
   ).recordset;
 
   if (!createdRows[0]) {
@@ -1542,16 +1739,17 @@ async function createCompanyServiceUser(companyId: number, payload: CreateServic
 }
 
 async function loadCompanyServiceUserById(companyId: number, clientId: number) {
+  await ensureClientCareColumns();
   const pool = await getAzureSqlPool();
   const hasKeyWorker = await hasClientKeyWorkerColumn();
   const keyWorkerSelect = hasKeyWorker
     ? `c.KeyWorkerName AS keyWorkerName,`
     : `CAST(NULL AS NVARCHAR(200)) AS keyWorkerName,`;
   const rows = (
-    await pool.request()
+    await scopedRequest(pool, { companyId })
       .input('companyId', mssql.Int, companyId)
       .input('clientId', mssql.Int, clientId)
-      .query<ServiceUserApiRow>(`
+      .query<ServiceUserApiRow>(withDbScope(`
         SELECT
           c.ClientID AS clientId,
           c.FirstName AS firstName,
@@ -1577,6 +1775,15 @@ async function loadCompanyServiceUserById(companyId: number, clientId: number) {
           c.EmergencyContactPhone AS emergencyContactPhone,
           c.EmergencyContactRelation AS emergencyContactRelation,
           c.PreferredContactMethod AS preferredContactMethod,
+          c.DNACPR AS dnacpr,
+          c.DoLSStatus AS dolsStatus,
+          c.Allergies AS allergies,
+          c.BloodType AS bloodType,
+          c.MedicalHistory AS medicalHistory,
+          c.AdmissionDate AS admissionDate,
+          c.NationalInsurance AS nationalInsurance,
+          c.PreferredDrink AS preferredDrink,
+          c.PrnMeds AS prnMeds,
           ${keyWorkerSelect}
           c.ClientType AS clientType,
           c.RiskLevel AS riskLevel,
@@ -1587,13 +1794,14 @@ async function loadCompanyServiceUserById(companyId: number, clientId: number) {
         FROM People.Clients c
         WHERE c.CompanyID = @companyId
           AND c.ClientID = @clientId
-      `)
+      `, { companyId }))
   ).recordset;
 
   return rows[0] ? mapServiceUserRow(rows[0]) : null;
 }
 
 async function updateCompanyServiceUser(companyId: number, clientId: number, payload: UpdateServiceUserInput) {
+  await ensureClientCareColumns();
   const existing = await loadCompanyServiceUserById(companyId, clientId);
   if (!existing) {
     throw Object.assign(new Error('Service user not found'), { code: 'P2025' });
@@ -1616,7 +1824,7 @@ async function updateCompanyServiceUser(companyId: number, clientId: number, pay
         : existing.dischargeDate || new Date().toISOString().slice(0, 10);
 
   const pool = await getAzureSqlPool();
-  const request = pool.request()
+  const request = scopedRequest(pool, { companyId })
     .input('companyId', mssql.Int, companyId)
     .input('clientId', mssql.Int, clientId)
     .input('clientType', mssql.NVarChar(50), nextClientType)
@@ -1634,6 +1842,15 @@ async function updateCompanyServiceUser(companyId: number, clientId: number, pay
     .input('gpDetails', mssql.NVarChar(500), payload.gpDetails ?? existing.gpDetails ?? '')
     .input('riskLevel', mssql.NVarChar(50), payload.riskLevel ?? existing.riskLevel ?? 'Low')
     .input('fundingSource', mssql.NVarChar(100), payload.fundingSource ?? existing.fundingSource ?? '')
+    .input('dnacpr', mssql.NVarChar(50), payload.dnacpr ?? existing.dnacpr ?? '')
+    .input('dolsStatus', mssql.NVarChar(100), payload.dolsStatus ?? existing.dolsStatus ?? '')
+    .input('allergies', mssql.NVarChar(1000), payload.allergies ?? existing.allergies ?? '')
+    .input('bloodType', mssql.NVarChar(10), payload.bloodType ?? existing.bloodType ?? '')
+    .input('medicalHistory', mssql.NVarChar(2000), payload.medicalHistory ?? existing.medicalHistory ?? '')
+    .input('admissionDate', mssql.Date, payload.admissionDate ?? existing.admissionDate ?? null)
+    .input('nationalInsurance', mssql.NVarChar(20), payload.nationalInsurance ?? existing.nationalInsurance ?? '')
+    .input('preferredDrink', mssql.NVarChar(100), payload.preferredDrink ?? existing.preferredDrink ?? '')
+    .input('prnMeds', mssql.NVarChar(500), payload.prnMeds ?? existing.prnMeds ?? '')
     .input('preferredName', mssql.NVarChar(100), payload.preferredName ?? existing.preferredName ?? '')
     .input('maritalStatus', mssql.NVarChar(50), payload.maritalStatus ?? existing.maritalStatus ?? '')
     .input('birthplace', mssql.NVarChar(100), payload.birthplace ?? existing.birthplace ?? '')
@@ -1665,7 +1882,7 @@ async function updateCompanyServiceUser(companyId: number, clientId: number, pay
     request.input('keyWorkerName', mssql.NVarChar(200), payload.keyWorker ?? existing.keyWorker ?? '');
   }
 
-  await request.query(`
+  await request.query(withDbScope(`
       UPDATE People.Clients
       SET
         ClientType = @clientType,
@@ -1683,6 +1900,15 @@ async function updateCompanyServiceUser(companyId: number, clientId: number, pay
         GP_Details = @gpDetails,
         RiskLevel = @riskLevel,
         FundingSource = @fundingSource,
+        DNACPR = @dnacpr,
+        DoLSStatus = @dolsStatus,
+        Allergies = @allergies,
+        BloodType = @bloodType,
+        MedicalHistory = @medicalHistory,
+        AdmissionDate = @admissionDate,
+        NationalInsurance = @nationalInsurance,
+        PreferredDrink = @preferredDrink,
+        PrnMeds = @prnMeds,
         PreferredName = @preferredName,
         MaritalStatus = @maritalStatus,
         Birthplace = @birthplace,
@@ -1700,7 +1926,7 @@ async function updateCompanyServiceUser(companyId: number, clientId: number, pay
         ModifiedDate = SYSUTCDATETIME()
       WHERE CompanyID = @companyId
         AND ClientID = @clientId
-    `);
+    `, { companyId }));
 
   const updated = await loadCompanyServiceUserById(companyId, clientId);
   if (!updated) {
@@ -1739,14 +1965,14 @@ async function loadCompanyUsers(companyId: number, userId?: number): Promise<Com
   const avatarSelect = includeAvatar
     ? `ISNULL(NULLIF(s.AvatarUrl, N''), N'') AS avatarUrl,`
     : `CAST(NULL AS NVARCHAR(MAX)) AS avatarUrl,`;
-  const request = pool.request().input('companyId', mssql.Int, companyId);
+  const request = scopedRequest(pool, { companyId }).input('companyId', mssql.Int, companyId);
   const userFilter = typeof userId === 'number' ? 'AND ua.UserID = @userId' : '';
   if (typeof userId === 'number') {
     request.input('userId', mssql.Int, userId);
   }
 
   const users = (
-    await request.query<CompanyUserRow>(`
+    await request.query<CompanyUserRow>(withDbScope(`
       SELECT
         CAST(ua.UserID AS NVARCHAR(50)) AS id,
         LTRIM(RTRIM(CONCAT(ISNULL(s.FirstName, N''), N' ', ISNULL(s.LastName, N'')))) AS name,
@@ -1806,7 +2032,7 @@ async function loadCompanyUsers(companyId: number, userId?: number): Promise<Com
       WHERE ua.CompanyID = @companyId
       ${userFilter}
       ORDER BY name ASC
-    `)
+    `, { companyId }))
   ).recordset.map((row) => ({
     ...row,
     name: row.name || row.email || `User ${row.id}`
@@ -1845,6 +2071,7 @@ async function createCompanyUser(session: AuthSession, payload: CompanyUserInput
   const pool = await getAzureSqlPool();
   const tx = new mssql.Transaction(pool);
   await tx.begin();
+  await setTransactionCompanyScope(tx, session.companyId);
 
   try {
     const duplicateRows = (
@@ -1948,6 +2175,7 @@ async function updateCompanyUser(session: AuthSession, userId: number, payload: 
   const pool = await getAzureSqlPool();
   const tx = new mssql.Transaction(pool);
   await tx.begin();
+  await setTransactionCompanyScope(tx, session.companyId);
 
   try {
     const existingRows = (
@@ -2144,10 +2372,10 @@ async function exchangeMicrosoftToken(idToken: string): Promise<ExchangeResult> 
   };
 
   let matchedRows = (
-    await pool.request()
+    await scopedRequest(pool, { isSuperAdmin: true })
       .input('tenantId', mssql.NVarChar(128), entraTenantId)
       .input('objectId', mssql.NVarChar(128), entraObjectId)
-      .query<UserRow>(`
+      .query<UserRow>(withDbScope(`
         SELECT TOP 1
           ua.UserID AS userId,
           ua.CompanyID AS companyId,
@@ -2165,15 +2393,15 @@ async function exchangeMicrosoftToken(idToken: string): Promise<ExchangeResult> 
           AND ua.EntraObjectID = @objectId
           AND ISNULL(c.ActiveStatus, 1) = 1
           AND ISNULL(ua.AccountStatus, N'Active') = N'Active'
-      `)
+      `, { isSuperAdmin: true }))
   ).recordset;
 
   if (matchedRows.length === 0 && loginEmail) {
     matchedRows = (
-      await pool.request()
+      await scopedRequest(pool, { isSuperAdmin: true })
         .input('tenantId', mssql.NVarChar(128), entraTenantId)
         .input('email', mssql.NVarChar(320), loginEmail)
-        .query<UserRow>(`
+        .query<UserRow>(withDbScope(`
           SELECT TOP 1
             ua.UserID AS userId,
             ua.CompanyID AS companyId,
@@ -2191,21 +2419,21 @@ async function exchangeMicrosoftToken(idToken: string): Promise<ExchangeResult> 
             AND LOWER(ua.Username) = LOWER(@email)
             AND ISNULL(c.ActiveStatus, 1) = 1
             AND ISNULL(ua.AccountStatus, N'Active') = N'Active'
-        `)
+        `, { isSuperAdmin: true }))
     ).recordset;
 
     if (matchedRows.length > 0) {
-      await pool.request()
+      await scopedRequest(pool, { isSuperAdmin: true })
         .input('objectId', mssql.NVarChar(128), entraObjectId)
         .input('userId', mssql.Int, matchedRows[0].userId)
-        .query(`
+        .query(withDbScope(`
           UPDATE Auth.UserAccount
           SET EntraObjectID = @objectId,
               AuthProvider = N'Microsoft',
               LastModifiedDate = SYSUTCDATETIME()
           WHERE UserID = @userId
             AND (EntraObjectID IS NULL OR EntraObjectID = N'')
-        `);
+        `, { isSuperAdmin: true }));
     }
   }
 
@@ -2215,10 +2443,10 @@ async function exchangeMicrosoftToken(idToken: string): Promise<ExchangeResult> 
 
   const user = matchedRows[0];
   const rolesRows = (
-    await pool.request()
+    await scopedRequest(pool, { companyId: user.companyId })
       .input('userId', mssql.Int, user.userId)
       .input('companyId', mssql.Int, user.companyId)
-      .query<{ roleName: string }>(`
+      .query<{ roleName: string }>(withDbScope(`
         SELECT ur.RoleName AS roleName
         FROM Auth.UserRoleAssignment ura
         INNER JOIN Auth.UserRole ur
@@ -2228,7 +2456,7 @@ async function exchangeMicrosoftToken(idToken: string): Promise<ExchangeResult> 
           AND ura.CompanyID = @companyId
           AND (ura.ExpiryDate IS NULL OR ura.ExpiryDate >= CAST(SYSUTCDATETIME() AS date))
           AND ISNULL(ur.IsActive, 1) = 1
-      `)
+      `, { companyId: user.companyId }))
   ).recordset;
 
   const roles = uniqueSorted(rolesRows.map((role) => readString(role.roleName)));

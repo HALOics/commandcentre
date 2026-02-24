@@ -434,7 +434,7 @@ function buildProfileData(serviceUser: ServiceUser, serviceUsers: ServiceUser[])
   const gender = serviceUser.gender || seedAt(genderSeeds, index);
   const maritalStatus = serviceUser.maritalStatus || "";
   const birthplace = serviceUser.birthplace || "";
-  const bloodType = seedAt(bloodTypeSeeds, index);
+  const bloodType = serviceUser.bloodType || seedAt(bloodTypeSeeds, index);
   const fundingSource = serviceUser.fundingSource || seedAt(fundingSourceSeeds, index);
   const familyContact = seedAt(familyContactSeeds, index);
   const clinicalLead = seedAt(clinicalLeadSeeds, index);
@@ -445,12 +445,23 @@ function buildProfileData(serviceUser: ServiceUser, serviceUsers: ServiceUser[])
   const nhsNumber =
     serviceUser.nhsNumber ||
     `${410 + index} ${String(230 + index * 7).padStart(3, "0")} ${String(1200 + index * 13).slice(-4)}`;
-  const nationalInsurance = `JC${String(490000 + index * 149).slice(-6)}${String.fromCharCode(65 + (index % 26))}`;
+  const nationalInsurance =
+    serviceUser.nationalInsurance || `JC${String(490000 + index * 149).slice(-6)}${String.fromCharCode(65 + (index % 26))}`;
   const profileScore = `${88 + (index % 8)}%`;
 
-  const allergiesSummary = serviceUser.flags.includes("Allergy") ? "Known allergy support in place" : "No known allergies";
-  const dnacpr = serviceUser.status === "hospitalised" ? "Clinical review pending" : "Attempt CPR";
-  const dolsStatus = serviceUser.status === "discharged" ? "No active DoLS" : "Authorised";
+  const allergiesSummary =
+    serviceUser.allergies ||
+    (serviceUser.flags.includes("Allergy") ? "Known allergy support in place" : "No known allergies");
+  const dnacpr = serviceUser.dnacpr || (serviceUser.status === "hospitalised" ? "Clinical review pending" : "Attempt CPR");
+  const dolsStatus = serviceUser.dolsStatus || (serviceUser.status === "discharged" ? "No active DoLS" : "Authorised");
+  const medicalHistory =
+    serviceUser.medicalHistory ||
+    (serviceUser.flags.includes("Medication watch")
+      ? "Medication watch active with daily review"
+      : "No high-risk history recorded");
+  const admissionDate = serviceUser.admissionDate
+    ? formatLongDate(serviceUser.admissionDate)
+    : formatLongDate(`2025-${String(1 + (index % 9)).padStart(2, "0")}-0${(index % 8) + 1}`);
   const careTeam = `${serviceUser.zone} Care Team`;
 
   const personalInfo: ProfileField[] = [
@@ -471,23 +482,18 @@ function buildProfileData(serviceUser: ServiceUser, serviceUsers: ServiceUser[])
     { label: "Status", value: statusLabels[serviceUser.status] }
   ];
 
-const careInfo: ProfileField[] = [
+  const careInfo: ProfileField[] = [
     { label: "DNACPR", value: dnacpr },
     { label: "DoLS status", value: dolsStatus },
     { label: "Allergies", value: allergiesSummary },
     { label: "Blood type", value: bloodType },
-    {
-      label: "Medical history",
-      value: serviceUser.flags.includes("Medication watch")
-        ? "Medication watch active with daily review"
-        : "No high-risk history recorded"
-    },
-    { label: "Admission date", value: formatLongDate(`2025-${String(1 + (index % 9)).padStart(2, "0")}-0${(index % 8) + 1}`) },
+    { label: "Medical history", value: medicalHistory },
+    { label: "Admission date", value: admissionDate },
     { label: "National Insurance", value: nationalInsurance },
     { label: "NHS number", value: nhsNumber },
     { label: "Funding source", value: fundingSource },
-    { label: "Preferred drink", value: index % 2 === 0 ? "Tea" : "Sparkling water" },
-    { label: "PRN meds", value: index % 3 === 0 ? "As required, monitored" : "None recorded" }
+    { label: "Preferred drink", value: serviceUser.preferredDrink || (index % 2 === 0 ? "Tea" : "Sparkling water") },
+    { label: "PRN meds", value: serviceUser.prnMeds || (index % 3 === 0 ? "As required, monitored" : "None recorded") }
   ];
 
   const contactInfo: ProfileField[] = [
@@ -657,6 +663,9 @@ export default function PeoplePage() {
   const [contactEditOpen, setContactEditOpen] = useState(false);
   const [contactSaveError, setContactSaveError] = useState("");
   const [isSavingContact, setIsSavingContact] = useState(false);
+  const [careEditOpen, setCareEditOpen] = useState(false);
+  const [careSaveError, setCareSaveError] = useState("");
+  const [isSavingCare, setIsSavingCare] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
   const [createError, setCreateError] = useState("");
@@ -702,6 +711,19 @@ export default function PeoplePage() {
     keyWorker: "",
     supportTier: "Light" as "Enhanced" | "Standard" | "Light",
     activeStatus: true
+  });
+  const [careForm, setCareForm] = useState({
+    dnacpr: "",
+    dolsStatus: "",
+    allergies: "",
+    bloodType: "",
+    medicalHistory: "",
+    admissionDate: "",
+    nationalInsurance: "",
+    nhsNumber: "",
+    fundingSource: "",
+    preferredDrink: "",
+    prnMeds: ""
   });
 
   const panelRefs: Record<ProfilePanelId, RefObject<HTMLElement>> = {
@@ -776,6 +798,7 @@ export default function PeoplePage() {
       setPersonalSaveError("");
       setSiteSaveError("");
       setContactSaveError("");
+      setCareSaveError("");
       const parsedSiteAddress = parseAddressParts(selectedServiceUser?.address || "");
       const currentZone = selectedServiceUser?.zone || "Community";
       const isDefinedBuilding = definedBuildingZones.includes(currentZone);
@@ -816,6 +839,19 @@ export default function PeoplePage() {
         religion: profileData.religion,
         carerGenderPreference: profileData.carerGenderPreference,
         carerNote: profileData.carerNote
+      });
+      setCareForm({
+        dnacpr: selectedServiceUser?.dnacpr || profileData.dnacpr || "",
+        dolsStatus: selectedServiceUser?.dolsStatus || profileData.dolsStatus || "",
+        allergies: selectedServiceUser?.allergies || profileData.allergiesSummary || "",
+        bloodType: selectedServiceUser?.bloodType || "",
+        medicalHistory: selectedServiceUser?.medicalHistory || "",
+        admissionDate: selectedServiceUser?.admissionDate || "",
+        nationalInsurance: selectedServiceUser?.nationalInsurance || "",
+        nhsNumber: selectedServiceUser?.nhsNumber || "",
+        fundingSource: selectedServiceUser?.fundingSource || "",
+        preferredDrink: selectedServiceUser?.preferredDrink || "",
+        prnMeds: selectedServiceUser?.prnMeds || ""
       });
     }
   }, [profileData, selectedServiceUser, serviceUserId]);
@@ -1020,6 +1056,58 @@ export default function PeoplePage() {
       setContactSaveError(error instanceof Error ? error.message : "Unable to save contact details.");
     } finally {
       setIsSavingContact(false);
+    }
+  }
+
+  async function saveCareInfo(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!selectedServiceUser) return;
+    setCareSaveError("");
+
+    try {
+      setIsSavingCare(true);
+      await updateServiceUser(selectedServiceUser.id, {
+        dnacpr: careForm.dnacpr,
+        dolsStatus: careForm.dolsStatus,
+        allergies: careForm.allergies,
+        bloodType: careForm.bloodType,
+        medicalHistory: careForm.medicalHistory,
+        admissionDate: careForm.admissionDate,
+        nationalInsurance: careForm.nationalInsurance,
+        nhsNumber: careForm.nhsNumber,
+        fundingSource: careForm.fundingSource,
+        preferredDrink: careForm.preferredDrink,
+        prnMeds: careForm.prnMeds,
+        firstName: selectedServiceUser.firstName || profileData?.firstName || "",
+        lastName: selectedServiceUser.lastName || profileData?.lastName || "",
+        dateOfBirth: selectedServiceUser.dateOfBirth || profileData?.dateOfBirth || "",
+        gender: selectedServiceUser.gender || profileData?.gender || "",
+        maritalStatus: selectedServiceUser.maritalStatus || profileData?.maritalStatus || "",
+        birthplace: selectedServiceUser.birthplace || profileData?.birthplace || "",
+        nationality: selectedServiceUser.nationality || profileData?.nationality || "",
+        languagesSpoken: selectedServiceUser.languagesSpoken || profileData?.languages.join(", ") || "",
+        ethnicity: selectedServiceUser.ethnicity || profileData?.ethnicity || "",
+        religion: selectedServiceUser.religion || profileData?.religion || "",
+        carerGenderPreference: selectedServiceUser.carerGenderPreference || profileData?.carerGenderPreference || "",
+        carerNote: selectedServiceUser.carerNote || profileData?.carerNote || "",
+        email: selectedServiceUser.email || "",
+        phone: selectedServiceUser.phone || "",
+        mobilePhone: selectedServiceUser.mobilePhone || "",
+        address: selectedServiceUser.address || "",
+        preferredContactMethod: selectedServiceUser.preferredContactMethod || "",
+        emergencyContactName: selectedServiceUser.emergencyContactName || "",
+        emergencyContactPhone: selectedServiceUser.emergencyContactPhone || "",
+        emergencyContactRelation: selectedServiceUser.emergencyContactRelation || "",
+        gpDetails: selectedServiceUser.gpDetails || "",
+        riskLevel: selectedServiceUser.riskLevel || ""
+      });
+      const users = await loadServiceUsers();
+      setServiceUsers(users);
+      setCareEditOpen(false);
+    } catch (error) {
+      setCareSaveError(error instanceof Error ? error.message : "Unable to save care information.");
+    } finally {
+      setIsSavingCare(false);
     }
   }
 
@@ -1674,12 +1762,121 @@ export default function PeoplePage() {
             >
               <header>
                 <h2>Care related information</h2>
-                <button type="button" className="profile-edit-btn">
+                <button type="button" className="profile-edit-btn" onClick={() => setCareEditOpen((v) => !v)}>
                   <EditIcon />
-                  Edit
+                  {careEditOpen ? "Close" : "Edit"}
                 </button>
               </header>
-              {renderTableRows(profileData.careInfo)}
+              {careSaveError ? <p className="people-form-error">{careSaveError}</p> : null}
+              {careEditOpen ? (
+                <form className="people-contact-form" onSubmit={saveCareInfo}>
+                  <div className="people-contact-form-grid">
+                    <label>
+                      <span>DNACPR</span>
+                      <input
+                        type="text"
+                        value={careForm.dnacpr}
+                        onChange={(e) => setCareForm((form) => ({ ...form, dnacpr: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>DoLS status</span>
+                      <input
+                        type="text"
+                        value={careForm.dolsStatus}
+                        onChange={(e) => setCareForm((form) => ({ ...form, dolsStatus: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Allergies</span>
+                      <input
+                        type="text"
+                        value={careForm.allergies}
+                        onChange={(e) => setCareForm((form) => ({ ...form, allergies: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Blood type</span>
+                      <input
+                        type="text"
+                        value={careForm.bloodType}
+                        onChange={(e) => setCareForm((form) => ({ ...form, bloodType: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Medical history</span>
+                      <input
+                        type="text"
+                        value={careForm.medicalHistory}
+                        onChange={(e) => setCareForm((form) => ({ ...form, medicalHistory: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Admission date</span>
+                      <input
+                        type="date"
+                        value={careForm.admissionDate}
+                        onChange={(e) => setCareForm((form) => ({ ...form, admissionDate: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>National Insurance</span>
+                      <input
+                        type="text"
+                        value={careForm.nationalInsurance}
+                        onChange={(e) => setCareForm((form) => ({ ...form, nationalInsurance: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>NHS number</span>
+                      <input
+                        type="text"
+                        value={careForm.nhsNumber}
+                        onChange={(e) => setCareForm((form) => ({ ...form, nhsNumber: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Funding source</span>
+                      <input
+                        type="text"
+                        value={careForm.fundingSource}
+                        onChange={(e) => setCareForm((form) => ({ ...form, fundingSource: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Preferred drink</span>
+                      <input
+                        type="text"
+                        value={careForm.preferredDrink}
+                        onChange={(e) => setCareForm((form) => ({ ...form, preferredDrink: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>PRN meds</span>
+                      <input
+                        type="text"
+                        value={careForm.prnMeds}
+                        onChange={(e) => setCareForm((form) => ({ ...form, prnMeds: e.target.value }))}
+                      />
+                    </label>
+                  </div>
+                  <div className="people-contact-form-actions">
+                    <button type="submit" className="btn-solid" disabled={isSavingCare}>
+                      {isSavingCare ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      onClick={() => setCareEditOpen(false)}
+                      disabled={isSavingCare}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                renderTableRows(profileData.careInfo)
+              )}
             </article>
 
             <article ref={panelRefs.important} className={`people-profile-card ${panelIs("important") ? "focus" : ""}`}>

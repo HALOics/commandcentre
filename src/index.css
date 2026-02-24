@@ -1824,6 +1824,21 @@ input {
   color: var(--text-soft);
 }
 
+.totp-qr-block {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(160, 188, 236, 0.35);
+  border-radius: 12px;
+  background: rgba(8, 22, 56, 0.22);
+  display: inline-flex;
+}
+
+.totp-qr-block img {
+  display: block;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
 .brief-block {
   display: grid;
   gap: 6px;

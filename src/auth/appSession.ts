@@ -70,20 +70,34 @@ export async function requestEmailMagicLink(email: string): Promise<void> {
 }
 
 export async function verifyEmailMagicLink(token: string): Promise<MagicVerifyData> {
-  const response = await fetch("/api/auth/email/verify", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token })
-  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch("/api/auth/email/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+      signal: controller.signal
+    });
 
-  const payload = (await response.json()) as { data?: MagicVerifyData; error?: string };
-  if (!response.ok || !payload.data?.challengeToken) {
-    const error = new Error(payload.error || "Magic link is invalid or expired.") as AppSessionError;
-    error.status = response.status;
+    const payload = (await response.json()) as { data?: MagicVerifyData; error?: string };
+    if (!response.ok || !payload.data?.challengeToken) {
+      const error = new Error(payload.error || "Magic link is invalid or expired.") as AppSessionError;
+      error.status = response.status;
+      throw error;
+    }
+
+    return payload.data;
+  } catch (error) {
+    if ((error as { name?: string }).name === "AbortError") {
+      const timeoutError = new Error("Sign-in verification timed out. Please request a new link and try again.") as AppSessionError;
+      timeoutError.status = 504;
+      throw timeoutError;
+    }
     throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
-
-  return payload.data;
 }
 
 export async function requestTotpSetup(challengeToken: string): Promise<{ manualKey: string; otpauthUri: string }> {

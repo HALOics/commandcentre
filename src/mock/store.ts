@@ -59,6 +59,15 @@ export type ServiceUser = {
   emergencyContactPhone?: string;
   emergencyContactRelation?: string;
   preferredContactMethod?: string;
+  dnacpr?: string;
+  dolsStatus?: string;
+  allergies?: string;
+  bloodType?: string;
+  medicalHistory?: string;
+  admissionDate?: string;
+  nationalInsurance?: string;
+  preferredDrink?: string;
+  prnMeds?: string;
   activeStatus?: boolean;
   dischargeDate?: string;
 };

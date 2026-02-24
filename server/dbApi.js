@@ -245,6 +245,7 @@ var jwksCache = new Map();
 var azureSqlPoolPromise = null;
 var hasStaffAvatarColumnCache = null;
 var hasClientKeyWorkerColumnCache = null;
+var hasClientCareColumnsCache = null;
 function getAzureSqlConnectionString() {
     return readString(process.env.AZURE_SQL_CONNECTION_STRING || process.env.SQLSERVER_CONNECTION_STRING);
 }
@@ -263,6 +264,32 @@ function getAzureSqlPool() {
                 });
             }
             return [2 /*return*/, azureSqlPoolPromise];
+        });
+    });
+}
+function withDbScope(sql, scope) {
+    if (scope === void 0) { scope = {}; }
+    var superAdminValue = scope.isSuperAdmin ? '1' : 'NULL';
+    var companyValue = Number.isFinite(scope.companyId) ? '@__scopeCompanyId' : 'NULL';
+    return "\n    EXEC sp_set_session_context @key = N'IsSuperAdmin', @value = ".concat(superAdminValue, ";\n    EXEC sp_set_session_context @key = N'CompanyID', @value = ").concat(companyValue, ";\n    ").concat(sql, "\n  ");
+}
+function scopedRequest(target, scope) {
+    if (scope === void 0) { scope = {}; }
+    var request = new mssql.Request(target);
+    if (Number.isFinite(scope.companyId)) {
+        request.input('__scopeCompanyId', mssql.Int, scope.companyId);
+    }
+    return request;
+}
+function setTransactionCompanyScope(tx, companyId) {
+    return __awaiter(this, void 0, void 0, function () {
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0: return [4 /*yield*/, scopedRequest(tx, { companyId: companyId }).query(withDbScope('SELECT 1 AS ok;', { companyId: companyId }))];
+                case 1:
+                    _a.sent();
+                    return [2 /*return*/];
+            }
         });
     });
 }
@@ -306,6 +333,26 @@ function hasClientKeyWorkerColumn() {
                     rows = (_b.sent()).recordset;
                     hasClientKeyWorkerColumnCache = Boolean((_a = rows[0]) === null || _a === void 0 ? void 0 : _a.hasColumn);
                     return [2 /*return*/, hasClientKeyWorkerColumnCache];
+            }
+        });
+    });
+}
+function ensureClientCareColumns() {
+    return __awaiter(this, void 0, void 0, function () {
+        var pool;
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0:
+                    if (hasClientCareColumnsCache)
+                        return [2 /*return*/];
+                    return [4 /*yield*/, getAzureSqlPool()];
+                case 1:
+                    pool = _a.sent();
+                    return [4 /*yield*/, pool.request().query("\n    IF COL_LENGTH('People.Clients', 'DNACPR') IS NULL\n      ALTER TABLE People.Clients ADD DNACPR NVARCHAR(50) NULL;\n    IF COL_LENGTH('People.Clients', 'DoLSStatus') IS NULL\n      ALTER TABLE People.Clients ADD DoLSStatus NVARCHAR(100) NULL;\n    IF COL_LENGTH('People.Clients', 'Allergies') IS NULL\n      ALTER TABLE People.Clients ADD Allergies NVARCHAR(1000) NULL;\n    IF COL_LENGTH('People.Clients', 'BloodType') IS NULL\n      ALTER TABLE People.Clients ADD BloodType NVARCHAR(10) NULL;\n    IF COL_LENGTH('People.Clients', 'MedicalHistory') IS NULL\n      ALTER TABLE People.Clients ADD MedicalHistory NVARCHAR(2000) NULL;\n    IF COL_LENGTH('People.Clients', 'AdmissionDate') IS NULL\n      ALTER TABLE People.Clients ADD AdmissionDate DATE NULL;\n    IF COL_LENGTH('People.Clients', 'NationalInsurance') IS NULL\n      ALTER TABLE People.Clients ADD NationalInsurance NVARCHAR(20) NULL;\n    IF COL_LENGTH('People.Clients', 'PreferredDrink') IS NULL\n      ALTER TABLE People.Clients ADD PreferredDrink NVARCHAR(100) NULL;\n    IF COL_LENGTH('People.Clients', 'PrnMeds') IS NULL\n      ALTER TABLE People.Clients ADD PrnMeds NVARCHAR(500) NULL;\n  ")];
+                case 2:
+                    _a.sent();
+                    hasClientCareColumnsCache = true;
+                    return [2 /*return*/];
             }
         });
     });
@@ -647,9 +694,9 @@ function findLoginUserByEmail(email) {
                     return [4 /*yield*/, getAzureSqlPool()];
                 case 1:
                     pool = _b.sent();
-                    return [4 /*yield*/, pool.request()
+                    return [4 /*yield*/, scopedRequest(pool, { isSuperAdmin: true })
                             .input('email', mssql.NVarChar(320), normalizedEmail)
-                            .query("\n        SELECT TOP 1\n          ua.UserID AS userId,\n          ua.CompanyID AS companyId,\n          ua.StaffID AS staffId,\n          ua.Username AS username,\n          ua.AccountStatus AS accountStatus,\n          s.FirstName AS firstName,\n          s.LastName AS lastName,\n          s.Email AS staffEmail,\n          c.CompanyName AS companyName\n        FROM Auth.UserAccount ua\n        INNER JOIN People.Company c ON c.CompanyID = ua.CompanyID\n        LEFT JOIN People.Staff s ON s.StaffID = ua.StaffID\n        WHERE LOWER(ua.Username) = LOWER(@email)\n          AND ISNULL(c.ActiveStatus, 1) = 1\n          AND ISNULL(ua.AccountStatus, N'Active') = N'Active'\n      ")];
+                            .query(withDbScope("\n        SELECT TOP 1\n          ua.UserID AS userId,\n          ua.CompanyID AS companyId,\n          ua.StaffID AS staffId,\n          ua.Username AS username,\n          ua.AccountStatus AS accountStatus,\n          s.FirstName AS firstName,\n          s.LastName AS lastName,\n          s.Email AS staffEmail,\n          c.CompanyName AS companyName\n        FROM Auth.UserAccount ua\n        INNER JOIN People.Company c ON c.CompanyID = ua.CompanyID\n        LEFT JOIN People.Staff s ON s.StaffID = ua.StaffID\n        WHERE LOWER(ua.Username) = LOWER(@email)\n          AND ISNULL(c.ActiveStatus, 1) = 1\n          AND ISNULL(ua.AccountStatus, N'Active') = N'Active'\n      ", { isSuperAdmin: true }))];
                 case 2:
                     rows = (_b.sent()).recordset;
                     return [2 /*return*/, (_a = rows[0]) !== null && _a !== void 0 ? _a : null];
@@ -668,7 +715,7 @@ function getUserTotpSecret(userId) {
                     return [4 /*yield*/, getAzureSqlPool()];
                 case 2:
                     pool = _a.sent();
-                    return [4 /*yield*/, pool.request().input('userId', mssql.Int, userId).query("\n      SELECT TOP 1 TotpSecretEncrypted AS secret, Enabled AS enabled\n      FROM Auth.UserMfa\n      WHERE UserID = @userId\n    ")];
+                    return [4 /*yield*/, scopedRequest(pool, { isSuperAdmin: true }).input('userId', mssql.Int, userId).query(withDbScope("\n      SELECT TOP 1 TotpSecretEncrypted AS secret, Enabled AS enabled\n      FROM Auth.UserMfa\n      WHERE UserID = @userId\n    ", { isSuperAdmin: true }))];
                 case 3:
                     rows = (_a.sent()).recordset;
                     entry = rows[0];
@@ -691,10 +738,10 @@ function setUserTotpSecret(userId, secretBase32) {
                     return [4 /*yield*/, getAzureSqlPool()];
                 case 2:
                     pool = _a.sent();
-                    return [4 /*yield*/, pool.request()
+                    return [4 /*yield*/, scopedRequest(pool, { isSuperAdmin: true })
                             .input('userId', mssql.Int, userId)
                             .input('secret', mssql.NVarChar(512), encrypted)
-                            .query("\n      IF EXISTS (SELECT 1 FROM Auth.UserMfa WHERE UserID = @userId)\n      BEGIN\n        UPDATE Auth.UserMfa\n        SET TotpSecretEncrypted = @secret,\n            Enabled = 1,\n            ModifiedDate = SYSUTCDATETIME()\n        WHERE UserID = @userId\n      END\n      ELSE\n      BEGIN\n        INSERT INTO Auth.UserMfa (UserID, TotpSecretEncrypted, Enabled, CreatedDate, ModifiedDate)\n        VALUES (@userId, @secret, 1, SYSUTCDATETIME(), SYSUTCDATETIME())\n      END\n    ")];
+                            .query(withDbScope("\n      IF EXISTS (SELECT 1 FROM Auth.UserMfa WHERE UserID = @userId)\n      BEGIN\n        UPDATE Auth.UserMfa\n        SET TotpSecretEncrypted = @secret,\n            Enabled = 1,\n            ModifiedDate = SYSUTCDATETIME()\n        WHERE UserID = @userId\n      END\n      ELSE\n      BEGIN\n        INSERT INTO Auth.UserMfa (UserID, TotpSecretEncrypted, Enabled, CreatedDate, ModifiedDate)\n        VALUES (@userId, @secret, 1, SYSUTCDATETIME(), SYSUTCDATETIME())\n      END\n    ", { isSuperAdmin: true }))];
                 case 3:
                     _a.sent();
                     return [2 /*return*/];
@@ -716,22 +763,22 @@ function getOrCreateUserDevice(params) {
                     return [4 /*yield*/, getAzureSqlPool()];
                 case 2:
                     pool = _a.sent();
-                    return [4 /*yield*/, pool.request()
+                    return [4 /*yield*/, scopedRequest(pool, { companyId: params.companyId })
                             .input('userId', mssql.Int, params.userId)
                             .input('companyId', mssql.Int, params.companyId)
                             .input('fingerprintHash', mssql.Char(64), params.fingerprintHash)
-                            .query("\n        SELECT TOP 1 CAST(DeviceID AS NVARCHAR(36)) AS deviceId, Status AS status\n        FROM Auth.UserDevice\n        WHERE UserID = @userId\n          AND CompanyID = @companyId\n          AND FingerprintHash = @fingerprintHash\n      ")];
+                            .query(withDbScope("\n        SELECT TOP 1 CAST(DeviceID AS NVARCHAR(36)) AS deviceId, Status AS status\n        FROM Auth.UserDevice\n        WHERE UserID = @userId\n          AND CompanyID = @companyId\n          AND FingerprintHash = @fingerprintHash\n      ", { companyId: params.companyId }))];
                 case 3:
                     existing = (_a.sent()).recordset[0];
                     if (existing) {
                         return [2 /*return*/, existing];
                     }
-                    return [4 /*yield*/, pool.request()
+                    return [4 /*yield*/, scopedRequest(pool, { companyId: params.companyId })
                             .input('userId', mssql.Int, params.userId)
                             .input('companyId', mssql.Int, params.companyId)
                             .input('fingerprintHash', mssql.Char(64), params.fingerprintHash)
                             .input('deviceLabel', mssql.NVarChar(200), params.deviceLabel || 'Unknown device')
-                            .query("\n        INSERT INTO Auth.UserDevice (\n          UserID,\n          CompanyID,\n          FingerprintHash,\n          DeviceLabel,\n          Status,\n          RequestedAt\n        )\n        OUTPUT CAST(inserted.DeviceID AS NVARCHAR(36)) AS deviceId, inserted.Status AS status\n        VALUES (\n          @userId,\n          @companyId,\n          @fingerprintHash,\n          @deviceLabel,\n          N'Pending',\n          SYSUTCDATETIME()\n        )\n      ")];
+                            .query(withDbScope("\n        INSERT INTO Auth.UserDevice (\n          UserID,\n          CompanyID,\n          FingerprintHash,\n          DeviceLabel,\n          Status,\n          RequestedAt\n        )\n        OUTPUT CAST(inserted.DeviceID AS NVARCHAR(36)) AS deviceId, inserted.Status AS status\n        VALUES (\n          @userId,\n          @companyId,\n          @fingerprintHash,\n          @deviceLabel,\n          N'Pending',\n          SYSUTCDATETIME()\n        )\n      ", { companyId: params.companyId }))];
                 case 4:
                     created = (_a.sent()).recordset[0];
                     return [2 /*return*/, created];
@@ -739,7 +786,7 @@ function getOrCreateUserDevice(params) {
         });
     });
 }
-function markDeviceLastSeen(deviceId) {
+function markDeviceLastSeen(deviceId, companyId) {
     return __awaiter(this, void 0, void 0, function () {
         var pool;
         return __generator(this, function (_a) {
@@ -750,7 +797,8 @@ function markDeviceLastSeen(deviceId) {
                     return [4 /*yield*/, getAzureSqlPool()];
                 case 2:
                     pool = _a.sent();
-                    return [4 /*yield*/, pool.request().input('deviceId', mssql.UniqueIdentifier, deviceId).query("\n    UPDATE Auth.UserDevice\n    SET LastSeenAt = SYSUTCDATETIME()\n    WHERE DeviceID = @deviceId\n  ")];
+                    return [4 /*yield*/, scopedRequest(pool, companyId ? { companyId: companyId } : { isSuperAdmin: true })
+                            .input('deviceId', mssql.UniqueIdentifier, deviceId).query(withDbScope("\n    UPDATE Auth.UserDevice\n    SET LastSeenAt = SYSUTCDATETIME()\n    WHERE DeviceID = @deviceId\n  ", companyId ? { companyId: companyId } : { isSuperAdmin: true }))];
                 case 3:
                     _a.sent();
                     return [2 /*return*/];
@@ -775,7 +823,7 @@ function listPendingDevices(companyId) {
                     return [4 /*yield*/, getAzureSqlPool()];
                 case 2:
                     pool = _a.sent();
-                    return [4 /*yield*/, pool.request().input('companyId', mssql.Int, companyId).query("\n      SELECT\n        CAST(d.DeviceID AS NVARCHAR(36)) AS deviceId,\n        d.UserID AS userId,\n        ua.Username AS username,\n        LTRIM(RTRIM(CONCAT(ISNULL(s.FirstName, N''), N' ', ISNULL(s.LastName, N'')))) AS displayName,\n        c.CompanyName AS companyName,\n        d.DeviceLabel AS deviceLabel,\n        d.Status AS status,\n        CONVERT(NVARCHAR(30), d.RequestedAt, 127) AS requestedAt\n      FROM Auth.UserDevice d\n      INNER JOIN Auth.UserAccount ua\n        ON ua.UserID = d.UserID\n       AND ua.CompanyID = d.CompanyID\n      INNER JOIN People.Company c\n        ON c.CompanyID = d.CompanyID\n      LEFT JOIN People.Staff s\n        ON s.StaffID = ua.StaffID\n      WHERE d.CompanyID = @companyId\n        AND d.Status = N'Pending'\n      ORDER BY d.RequestedAt DESC\n    ")];
+                    return [4 /*yield*/, scopedRequest(pool, { companyId: companyId }).input('companyId', mssql.Int, companyId).query(withDbScope("\n      SELECT\n        CAST(d.DeviceID AS NVARCHAR(36)) AS deviceId,\n        d.UserID AS userId,\n        ua.Username AS username,\n        LTRIM(RTRIM(CONCAT(ISNULL(s.FirstName, N''), N' ', ISNULL(s.LastName, N'')))) AS displayName,\n        c.CompanyName AS companyName,\n        d.DeviceLabel AS deviceLabel,\n        d.Status AS status,\n        CONVERT(NVARCHAR(30), d.RequestedAt, 127) AS requestedAt\n      FROM Auth.UserDevice d\n      INNER JOIN Auth.UserAccount ua\n        ON ua.UserID = d.UserID\n       AND ua.CompanyID = d.CompanyID\n      INNER JOIN People.Company c\n        ON c.CompanyID = d.CompanyID\n      LEFT JOIN People.Staff s\n        ON s.StaffID = ua.StaffID\n      WHERE d.CompanyID = @companyId\n        AND d.Status = N'Pending'\n      ORDER BY d.RequestedAt DESC\n    ", { companyId: companyId }))];
                 case 3:
                     rows = (_a.sent()).recordset;
                     return [2 /*return*/, rows];
@@ -794,12 +842,12 @@ function setDeviceStatus(companyId, deviceId, adminUserId, status) {
                     return [4 /*yield*/, getAzureSqlPool()];
                 case 2:
                     pool = _a.sent();
-                    return [4 /*yield*/, pool.request()
+                    return [4 /*yield*/, scopedRequest(pool, { companyId: companyId })
                             .input('companyId', mssql.Int, companyId)
                             .input('deviceId', mssql.UniqueIdentifier, deviceId)
                             .input('adminUserId', mssql.Int, adminUserId)
                             .input('status', mssql.NVarChar(20), status)
-                            .query("\n      UPDATE Auth.UserDevice\n      SET Status = @status,\n          ApprovedByUserID = @adminUserId,\n          ApprovedAt = SYSUTCDATETIME()\n      WHERE CompanyID = @companyId\n        AND DeviceID = @deviceId\n    ")];
+                            .query(withDbScope("\n      UPDATE Auth.UserDevice\n      SET Status = @status,\n          ApprovedByUserID = @adminUserId,\n          ApprovedAt = SYSUTCDATETIME()\n      WHERE CompanyID = @companyId\n        AND DeviceID = @deviceId\n    ", { companyId: companyId }))];
                 case 3:
                     _a.sent();
                     return [2 /*return*/];
@@ -815,13 +863,32 @@ function loadUserRoles(userId, companyId) {
                 case 0: return [4 /*yield*/, getAzureSqlPool()];
                 case 1:
                     pool = _a.sent();
-                    return [4 /*yield*/, pool.request()
+                    return [4 /*yield*/, scopedRequest(pool, { companyId: companyId })
                             .input('userId', mssql.Int, userId)
                             .input('companyId', mssql.Int, companyId)
-                            .query("\n        SELECT ur.RoleName AS roleName\n        FROM Auth.UserRoleAssignment ura\n        INNER JOIN Auth.UserRole ur\n          ON ur.RoleID = ura.RoleID\n         AND ur.CompanyID = ura.CompanyID\n        WHERE ura.UserID = @userId\n          AND ura.CompanyID = @companyId\n          AND (ura.ExpiryDate IS NULL OR ura.ExpiryDate >= CAST(SYSUTCDATETIME() AS date))\n          AND ISNULL(ur.IsActive, 1) = 1\n      ")];
+                            .query(withDbScope("\n        SELECT ur.RoleName AS roleName\n        FROM Auth.UserRoleAssignment ura\n        INNER JOIN Auth.UserRole ur\n          ON ur.RoleID = ura.RoleID\n         AND ur.CompanyID = ura.CompanyID\n        WHERE ura.UserID = @userId\n          AND ura.CompanyID = @companyId\n          AND (ura.ExpiryDate IS NULL OR ura.ExpiryDate >= CAST(SYSUTCDATETIME() AS date))\n          AND ISNULL(ur.IsActive, 1) = 1\n      ", { companyId: companyId }))];
                 case 2:
                     rolesRows = (_a.sent()).recordset;
                     return [2 /*return*/, uniqueSorted(rolesRows.map(function (role) { return readString(role.roleName); }))];
+            }
+        });
+    });
+}
+function companyHasActiveAdmin(companyId) {
+    return __awaiter(this, void 0, void 0, function () {
+        var pool, rows;
+        var _a;
+        return __generator(this, function (_b) {
+            switch (_b.label) {
+                case 0: return [4 /*yield*/, getAzureSqlPool()];
+                case 1:
+                    pool = _b.sent();
+                    return [4 /*yield*/, scopedRequest(pool, { companyId: companyId })
+                            .input('companyId', mssql.Int, companyId)
+                            .query(withDbScope("\n        SELECT TOP 1 CAST(1 AS INT) AS hasAdmin\n        FROM Auth.UserRoleAssignment ura\n        INNER JOIN Auth.UserRole ur\n          ON ur.RoleID = ura.RoleID\n         AND ur.CompanyID = ura.CompanyID\n        INNER JOIN Auth.UserAccount ua\n          ON ua.UserID = ura.UserID\n         AND ua.CompanyID = ura.CompanyID\n        WHERE ura.CompanyID = @companyId\n          AND (ura.ExpiryDate IS NULL OR ura.ExpiryDate >= CAST(SYSUTCDATETIME() AS date))\n          AND ISNULL(ur.IsActive, 1) = 1\n          AND ISNULL(ua.AccountStatus, N'Active') = N'Active'\n          AND (\n            LOWER(ur.RoleName) LIKE N'%admin%'\n            OR LOWER(ur.RoleName) LIKE N'%manager%'\n          )\n      ", { companyId: companyId }))];
+                case 2:
+                    rows = (_b.sent()).recordset;
+                    return [2 /*return*/, Boolean((_a = rows[0]) === null || _a === void 0 ? void 0 : _a.hasAdmin)];
             }
         });
     });
@@ -943,13 +1010,12 @@ function verifyMagicLink(token) {
                     return [4 /*yield*/, loadUserRoles(user.userId, user.companyId)];
                 case 2:
                     roles = _a.sent();
-                    entry.usedAt = Date.now();
-                    emailLoginTokens.delete(tokenHash);
                     removeExpiredChallenges();
                     challengeToken = randomUUID();
                     expiresAt = Date.now() + LOGIN_CHALLENGE_TTL_MS;
                     pendingLoginChallenges.set(challengeToken, {
                         challengeToken: challengeToken,
+                        tokenHash: tokenHash,
                         user: user,
                         roles: roles,
                         expiresAt: expiresAt
@@ -1028,7 +1094,7 @@ function enableTotp(challengeToken, code) {
 }
 function completeMagicLogin(params) {
     return __awaiter(this, void 0, void 0, function () {
-        var challenge, secret, fingerprintRaw, fingerprintHash, device;
+        var challenge, secret, fingerprintRaw, fingerprintHash, device, hasAdmin, tokenEntry;
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0:
@@ -1055,12 +1121,26 @@ function completeMagicLogin(params) {
                         })];
                 case 2:
                     device = _a.sent();
-                    if (device.status !== 'Approved') {
-                        return [2 /*return*/, { pendingApproval: true }];
-                    }
-                    return [4 /*yield*/, markDeviceLastSeen(device.deviceId)];
+                    if (!(device.status !== 'Approved')) return [3 /*break*/, 6];
+                    return [4 /*yield*/, companyHasActiveAdmin(challenge.user.companyId)];
                 case 3:
+                    hasAdmin = _a.sent();
+                    if (!!hasAdmin) return [3 /*break*/, 5];
+                    // Bootstrap path: if no admin exists for this company yet, allow first-device approval.
+                    return [4 /*yield*/, setDeviceStatus(challenge.user.companyId, device.deviceId, challenge.user.userId, 'Approved')];
+                case 4:
+                    // Bootstrap path: if no admin exists for this company yet, allow first-device approval.
                     _a.sent();
+                    return [3 /*break*/, 6];
+                case 5: return [2 /*return*/, { pendingApproval: true }];
+                case 6: return [4 /*yield*/, markDeviceLastSeen(device.deviceId, challenge.user.companyId)];
+                case 7:
+                    _a.sent();
+                    tokenEntry = emailLoginTokens.get(challenge.tokenHash);
+                    if (tokenEntry) {
+                        tokenEntry.usedAt = Date.now();
+                        emailLoginTokens.delete(challenge.tokenHash);
+                    }
                     pendingLoginChallenges.delete(params.challengeToken);
                     return [2 /*return*/, { session: issueSession(challenge.user, challenge.roles) }];
             }
@@ -1098,6 +1178,15 @@ function sanitizeCreateServiceUserBody(body) {
         gpDetails: readString(body.gpDetails),
         riskLevel: readString(body.riskLevel),
         fundingSource: readString(body.fundingSource),
+        dnacpr: readString(body.dnacpr),
+        dolsStatus: readString(body.dolsStatus),
+        allergies: readString(body.allergies),
+        bloodType: readString(body.bloodType),
+        medicalHistory: readString(body.medicalHistory),
+        admissionDate: readString(body.admissionDate),
+        nationalInsurance: readString(body.nationalInsurance),
+        preferredDrink: readString(body.preferredDrink),
+        prnMeds: readString(body.prnMeds),
         activeStatus: activeStatus,
         dischargeDate: readString(body.dischargeDate)
     };
@@ -1141,6 +1230,24 @@ function sanitizeUpdateServiceUserBody(body) {
         payload.riskLevel = readString(body.riskLevel);
     if ('fundingSource' in body)
         payload.fundingSource = readString(body.fundingSource);
+    if ('dnacpr' in body)
+        payload.dnacpr = readString(body.dnacpr);
+    if ('dolsStatus' in body)
+        payload.dolsStatus = readString(body.dolsStatus);
+    if ('allergies' in body)
+        payload.allergies = readString(body.allergies);
+    if ('bloodType' in body)
+        payload.bloodType = readString(body.bloodType);
+    if ('medicalHistory' in body)
+        payload.medicalHistory = readString(body.medicalHistory);
+    if ('admissionDate' in body)
+        payload.admissionDate = readString(body.admissionDate);
+    if ('nationalInsurance' in body)
+        payload.nationalInsurance = readString(body.nationalInsurance);
+    if ('preferredDrink' in body)
+        payload.preferredDrink = readString(body.preferredDrink);
+    if ('prnMeds' in body)
+        payload.prnMeds = readString(body.prnMeds);
     if ('preferredName' in body)
         payload.preferredName = readString(body.preferredName);
     if ('maritalStatus' in body)
@@ -1236,6 +1343,15 @@ function mapServiceUserRow(row) {
         emergencyContactPhone: readString(row.emergencyContactPhone),
         emergencyContactRelation: readString(row.emergencyContactRelation),
         preferredContactMethod: readString(row.preferredContactMethod),
+        dnacpr: readString(row.dnacpr),
+        dolsStatus: readString(row.dolsStatus),
+        allergies: readString(row.allergies),
+        bloodType: readString(row.bloodType),
+        medicalHistory: readString(row.medicalHistory),
+        admissionDate: row.admissionDate ? row.admissionDate.toISOString().slice(0, 10) : '',
+        nationalInsurance: readString(row.nationalInsurance),
+        preferredDrink: readString(row.preferredDrink),
+        prnMeds: readString(row.prnMeds),
         activeStatus: Boolean(row.activeStatus),
         dischargeDate: row.dischargeDate ? row.dischargeDate.toISOString().slice(0, 10) : ''
     };
@@ -1245,19 +1361,22 @@ function loadCompanyServiceUsers(companyId) {
         var pool, hasKeyWorker, keyWorkerSelect, rows;
         return __generator(this, function (_a) {
             switch (_a.label) {
-                case 0: return [4 /*yield*/, getAzureSqlPool()];
+                case 0: return [4 /*yield*/, ensureClientCareColumns()];
                 case 1:
+                    _a.sent();
+                    return [4 /*yield*/, getAzureSqlPool()];
+                case 2:
                     pool = _a.sent();
                     return [4 /*yield*/, hasClientKeyWorkerColumn()];
-                case 2:
+                case 3:
                     hasKeyWorker = _a.sent();
                     keyWorkerSelect = hasKeyWorker
                         ? "c.KeyWorkerName AS keyWorkerName,"
                         : "CAST(NULL AS NVARCHAR(200)) AS keyWorkerName,";
-                    return [4 /*yield*/, pool.request()
+                    return [4 /*yield*/, scopedRequest(pool, { companyId: companyId })
                             .input('companyId', mssql.Int, companyId)
-                            .query("\n        SELECT\n          c.ClientID AS clientId,\n          c.FirstName AS firstName,\n          c.LastName AS lastName,\n          c.DateOfBirth AS dateOfBirth,\n          c.Gender AS gender,\n          c.Email AS email,\n          c.Phone AS phone,\n          c.MobilePhone AS mobilePhone,\n          c.NHS_Number AS nhsNumber,\n          c.GP_Details AS gpDetails,\n          c.FundingSource AS fundingSource,\n          c.PreferredName AS preferredName,\n          c.MaritalStatus AS maritalStatus,\n          c.Birthplace AS birthplace,\n          c.Nationality AS nationality,\n          c.LanguagesSpoken AS languagesSpoken,\n          c.Ethnicity AS ethnicity,\n          c.Religion AS religion,\n          c.CarerGenderPreference AS carerGenderPreference,\n          c.CarerNote AS carerNote,\n          c.EmergencyContactName AS emergencyContactName,\n          c.EmergencyContactPhone AS emergencyContactPhone,\n          c.EmergencyContactRelation AS emergencyContactRelation,\n          c.PreferredContactMethod AS preferredContactMethod,\n          ".concat(keyWorkerSelect, "\n          c.ClientType AS clientType,\n          c.RiskLevel AS riskLevel,\n          c.ActiveStatus AS activeStatus,\n          c.DischargeDate AS dischargeDate,\n          c.ModifiedDate AS modifiedDate,\n          c.Address AS address\n        FROM People.Clients c\n        WHERE c.CompanyID = @companyId\n        ORDER BY c.ModifiedDate DESC, c.ClientID DESC\n      "))];
-                case 3:
+                            .query(withDbScope("\n        SELECT\n          c.ClientID AS clientId,\n          c.FirstName AS firstName,\n          c.LastName AS lastName,\n          c.DateOfBirth AS dateOfBirth,\n          c.Gender AS gender,\n          c.Email AS email,\n          c.Phone AS phone,\n          c.MobilePhone AS mobilePhone,\n          c.NHS_Number AS nhsNumber,\n          c.GP_Details AS gpDetails,\n          c.FundingSource AS fundingSource,\n          c.PreferredName AS preferredName,\n          c.MaritalStatus AS maritalStatus,\n          c.Birthplace AS birthplace,\n          c.Nationality AS nationality,\n          c.LanguagesSpoken AS languagesSpoken,\n          c.Ethnicity AS ethnicity,\n          c.Religion AS religion,\n          c.CarerGenderPreference AS carerGenderPreference,\n          c.CarerNote AS carerNote,\n          c.EmergencyContactName AS emergencyContactName,\n          c.EmergencyContactPhone AS emergencyContactPhone,\n          c.EmergencyContactRelation AS emergencyContactRelation,\n          c.PreferredContactMethod AS preferredContactMethod,\n          c.DNACPR AS dnacpr,\n          c.DoLSStatus AS dolsStatus,\n          c.Allergies AS allergies,\n          c.BloodType AS bloodType,\n          c.MedicalHistory AS medicalHistory,\n          c.AdmissionDate AS admissionDate,\n          c.NationalInsurance AS nationalInsurance,\n          c.PreferredDrink AS preferredDrink,\n          c.PrnMeds AS prnMeds,\n          ".concat(keyWorkerSelect, "\n          c.ClientType AS clientType,\n          c.RiskLevel AS riskLevel,\n          c.ActiveStatus AS activeStatus,\n          c.DischargeDate AS dischargeDate,\n          c.ModifiedDate AS modifiedDate,\n          c.Address AS address\n        FROM People.Clients c\n        WHERE c.CompanyID = @companyId\n        ORDER BY c.ModifiedDate DESC, c.ClientID DESC\n      "), { companyId: companyId }))];
+                case 4:
                     rows = (_a.sent()).recordset;
                     return [2 /*return*/, rows.map(mapServiceUserRow)];
             }
@@ -1274,10 +1393,13 @@ function createCompanyServiceUser(companyId, payload) {
                     if (!payload.firstName || !payload.lastName) {
                         throw Object.assign(new Error('First name and last name are required'), { code: 'VALIDATION_ERROR' });
                     }
-                    return [4 /*yield*/, getAzureSqlPool()];
+                    return [4 /*yield*/, ensureClientCareColumns()];
                 case 1:
+                    _b.sent();
+                    return [4 /*yield*/, getAzureSqlPool()];
+                case 2:
                     pool = _b.sent();
-                    request = pool.request()
+                    request = scopedRequest(pool, { companyId: companyId })
                         .input('companyId', mssql.Int, companyId)
                         .input('clientType', mssql.NVarChar(50), payload.clientType || 'Community')
                         .input('firstName', mssql.NVarChar(100), payload.firstName)
@@ -1292,26 +1414,35 @@ function createCompanyServiceUser(companyId, payload) {
                         .input('gpDetails', mssql.NVarChar(500), payload.gpDetails || '')
                         .input('riskLevel', mssql.NVarChar(50), payload.riskLevel || 'Low')
                         .input('fundingSource', mssql.NVarChar(100), payload.fundingSource || '')
+                        .input('dnacpr', mssql.NVarChar(50), payload.dnacpr || '')
+                        .input('dolsStatus', mssql.NVarChar(100), payload.dolsStatus || '')
+                        .input('allergies', mssql.NVarChar(1000), payload.allergies || '')
+                        .input('bloodType', mssql.NVarChar(10), payload.bloodType || '')
+                        .input('medicalHistory', mssql.NVarChar(2000), payload.medicalHistory || '')
+                        .input('admissionDate', mssql.Date, payload.admissionDate || null)
+                        .input('nationalInsurance', mssql.NVarChar(20), payload.nationalInsurance || '')
+                        .input('preferredDrink', mssql.NVarChar(100), payload.preferredDrink || '')
+                        .input('prnMeds', mssql.NVarChar(500), payload.prnMeds || '')
                         .input('activeStatus', mssql.Bit, payload.activeStatus ? 1 : 0)
                         .input('dischargeDate', mssql.Date, payload.dischargeDate || null);
-                    return [4 /*yield*/, request.query("\n      INSERT INTO People.Clients (\n        CompanyID,\n        ClientType,\n        FirstName,\n        LastName,\n        DateOfBirth,\n        Gender,\n        Email,\n        Phone,\n        MobilePhone,\n        Address,\n        NHS_Number,\n        GP_Details,\n        RiskLevel,\n        FundingSource,\n        ActiveStatus,\n        DischargeDate,\n        CreatedDate,\n        ModifiedDate\n      )\n      VALUES (\n        @companyId,\n        @clientType,\n        @firstName,\n        @lastName,\n        @dateOfBirth,\n        @gender,\n        @email,\n        @phone,\n        @mobilePhone,\n        @address,\n        @nhsNumber,\n        @gpDetails,\n        @riskLevel,\n        @fundingSource,\n        @activeStatus,\n        @dischargeDate,\n        SYSUTCDATETIME(),\n        SYSUTCDATETIME()\n      );\n      SELECT CAST(SCOPE_IDENTITY() AS INT) AS clientId;\n    ")];
-                case 2:
+                    return [4 /*yield*/, request.query(withDbScope("\n      INSERT INTO People.Clients (\n        CompanyID,\n        ClientType,\n        FirstName,\n        LastName,\n        DateOfBirth,\n        Gender,\n        Email,\n        Phone,\n        MobilePhone,\n        Address,\n        NHS_Number,\n        GP_Details,\n        RiskLevel,\n        FundingSource,\n        DNACPR,\n        DoLSStatus,\n        Allergies,\n        BloodType,\n        MedicalHistory,\n        AdmissionDate,\n        NationalInsurance,\n        PreferredDrink,\n        PrnMeds,\n        ActiveStatus,\n        DischargeDate,\n        CreatedDate,\n        ModifiedDate\n      )\n      VALUES (\n        @companyId,\n        @clientType,\n        @firstName,\n        @lastName,\n        @dateOfBirth,\n        @gender,\n        @email,\n        @phone,\n        @mobilePhone,\n        @address,\n        @nhsNumber,\n        @gpDetails,\n        @riskLevel,\n        @fundingSource,\n        @dnacpr,\n        @dolsStatus,\n        @allergies,\n        @bloodType,\n        @medicalHistory,\n        @admissionDate,\n        @nationalInsurance,\n        @preferredDrink,\n        @prnMeds,\n        @activeStatus,\n        @dischargeDate,\n        SYSUTCDATETIME(),\n        SYSUTCDATETIME()\n      );\n      SELECT CAST(SCOPE_IDENTITY() AS INT) AS clientId;\n    ", { companyId: companyId }))];
+                case 3:
                     insertedRows = (_b.sent()).recordset;
                     clientId = (_a = insertedRows[0]) === null || _a === void 0 ? void 0 : _a.clientId;
                     if (!clientId) {
                         throw Object.assign(new Error('Unable to create service user'), { code: 'VALIDATION_ERROR' });
                     }
                     return [4 /*yield*/, hasClientKeyWorkerColumn()];
-                case 3:
+                case 4:
                     hasKeyWorker = _b.sent();
                     keyWorkerSelect = hasKeyWorker
                         ? "c.KeyWorkerName AS keyWorkerName,"
                         : "CAST(NULL AS NVARCHAR(200)) AS keyWorkerName,";
-                    return [4 /*yield*/, pool.request()
+                    return [4 /*yield*/, scopedRequest(pool, { companyId: companyId })
                             .input('companyId', mssql.Int, companyId)
                             .input('clientId', mssql.Int, clientId)
-                            .query("\n        SELECT\n          c.ClientID AS clientId,\n          c.FirstName AS firstName,\n          c.LastName AS lastName,\n          c.DateOfBirth AS dateOfBirth,\n          c.Gender AS gender,\n          c.Email AS email,\n          c.Phone AS phone,\n          c.MobilePhone AS mobilePhone,\n          c.NHS_Number AS nhsNumber,\n          c.GP_Details AS gpDetails,\n          c.FundingSource AS fundingSource,\n          c.PreferredName AS preferredName,\n          c.MaritalStatus AS maritalStatus,\n          c.Birthplace AS birthplace,\n          c.Nationality AS nationality,\n          c.LanguagesSpoken AS languagesSpoken,\n          c.Ethnicity AS ethnicity,\n          c.Religion AS religion,\n          c.CarerGenderPreference AS carerGenderPreference,\n          c.CarerNote AS carerNote,\n          c.EmergencyContactName AS emergencyContactName,\n          c.EmergencyContactPhone AS emergencyContactPhone,\n          c.EmergencyContactRelation AS emergencyContactRelation,\n          c.PreferredContactMethod AS preferredContactMethod,\n          ".concat(keyWorkerSelect, "\n          c.ClientType AS clientType,\n          c.RiskLevel AS riskLevel,\n          c.ActiveStatus AS activeStatus,\n          c.DischargeDate AS dischargeDate,\n          c.ModifiedDate AS modifiedDate,\n          c.Address AS address\n        FROM People.Clients c\n        WHERE c.CompanyID = @companyId\n          AND c.ClientID = @clientId\n      "))];
-                case 4:
+                            .query(withDbScope("\n        SELECT\n          c.ClientID AS clientId,\n          c.FirstName AS firstName,\n          c.LastName AS lastName,\n          c.DateOfBirth AS dateOfBirth,\n          c.Gender AS gender,\n          c.Email AS email,\n          c.Phone AS phone,\n          c.MobilePhone AS mobilePhone,\n          c.NHS_Number AS nhsNumber,\n          c.GP_Details AS gpDetails,\n          c.FundingSource AS fundingSource,\n          c.PreferredName AS preferredName,\n          c.MaritalStatus AS maritalStatus,\n          c.Birthplace AS birthplace,\n          c.Nationality AS nationality,\n          c.LanguagesSpoken AS languagesSpoken,\n          c.Ethnicity AS ethnicity,\n          c.Religion AS religion,\n          c.CarerGenderPreference AS carerGenderPreference,\n          c.CarerNote AS carerNote,\n          c.EmergencyContactName AS emergencyContactName,\n          c.EmergencyContactPhone AS emergencyContactPhone,\n          c.EmergencyContactRelation AS emergencyContactRelation,\n          c.PreferredContactMethod AS preferredContactMethod,\n          c.DNACPR AS dnacpr,\n          c.DoLSStatus AS dolsStatus,\n          c.Allergies AS allergies,\n          c.BloodType AS bloodType,\n          c.MedicalHistory AS medicalHistory,\n          c.AdmissionDate AS admissionDate,\n          c.NationalInsurance AS nationalInsurance,\n          c.PreferredDrink AS preferredDrink,\n          c.PrnMeds AS prnMeds,\n          ".concat(keyWorkerSelect, "\n          c.ClientType AS clientType,\n          c.RiskLevel AS riskLevel,\n          c.ActiveStatus AS activeStatus,\n          c.DischargeDate AS dischargeDate,\n          c.ModifiedDate AS modifiedDate,\n          c.Address AS address\n        FROM People.Clients c\n        WHERE c.CompanyID = @companyId\n          AND c.ClientID = @clientId\n      "), { companyId: companyId }))];
+                case 5:
                     createdRows = (_b.sent()).recordset;
                     if (!createdRows[0]) {
                         throw Object.assign(new Error('Created service user could not be loaded'), { code: 'VALIDATION_ERROR' });
@@ -1326,20 +1457,23 @@ function loadCompanyServiceUserById(companyId, clientId) {
         var pool, hasKeyWorker, keyWorkerSelect, rows;
         return __generator(this, function (_a) {
             switch (_a.label) {
-                case 0: return [4 /*yield*/, getAzureSqlPool()];
+                case 0: return [4 /*yield*/, ensureClientCareColumns()];
                 case 1:
+                    _a.sent();
+                    return [4 /*yield*/, getAzureSqlPool()];
+                case 2:
                     pool = _a.sent();
                     return [4 /*yield*/, hasClientKeyWorkerColumn()];
-                case 2:
+                case 3:
                     hasKeyWorker = _a.sent();
                     keyWorkerSelect = hasKeyWorker
                         ? "c.KeyWorkerName AS keyWorkerName,"
                         : "CAST(NULL AS NVARCHAR(200)) AS keyWorkerName,";
-                    return [4 /*yield*/, pool.request()
+                    return [4 /*yield*/, scopedRequest(pool, { companyId: companyId })
                             .input('companyId', mssql.Int, companyId)
                             .input('clientId', mssql.Int, clientId)
-                            .query("\n        SELECT\n          c.ClientID AS clientId,\n          c.FirstName AS firstName,\n          c.LastName AS lastName,\n          c.DateOfBirth AS dateOfBirth,\n          c.Gender AS gender,\n          c.Email AS email,\n          c.Phone AS phone,\n          c.MobilePhone AS mobilePhone,\n          c.NHS_Number AS nhsNumber,\n          c.GP_Details AS gpDetails,\n          c.FundingSource AS fundingSource,\n          c.PreferredName AS preferredName,\n          c.MaritalStatus AS maritalStatus,\n          c.Birthplace AS birthplace,\n          c.Nationality AS nationality,\n          c.LanguagesSpoken AS languagesSpoken,\n          c.Ethnicity AS ethnicity,\n          c.Religion AS religion,\n          c.CarerGenderPreference AS carerGenderPreference,\n          c.CarerNote AS carerNote,\n          c.EmergencyContactName AS emergencyContactName,\n          c.EmergencyContactPhone AS emergencyContactPhone,\n          c.EmergencyContactRelation AS emergencyContactRelation,\n          c.PreferredContactMethod AS preferredContactMethod,\n          ".concat(keyWorkerSelect, "\n          c.ClientType AS clientType,\n          c.RiskLevel AS riskLevel,\n          c.ActiveStatus AS activeStatus,\n          c.DischargeDate AS dischargeDate,\n          c.ModifiedDate AS modifiedDate,\n          c.Address AS address\n        FROM People.Clients c\n        WHERE c.CompanyID = @companyId\n          AND c.ClientID = @clientId\n      "))];
-                case 3:
+                            .query(withDbScope("\n        SELECT\n          c.ClientID AS clientId,\n          c.FirstName AS firstName,\n          c.LastName AS lastName,\n          c.DateOfBirth AS dateOfBirth,\n          c.Gender AS gender,\n          c.Email AS email,\n          c.Phone AS phone,\n          c.MobilePhone AS mobilePhone,\n          c.NHS_Number AS nhsNumber,\n          c.GP_Details AS gpDetails,\n          c.FundingSource AS fundingSource,\n          c.PreferredName AS preferredName,\n          c.MaritalStatus AS maritalStatus,\n          c.Birthplace AS birthplace,\n          c.Nationality AS nationality,\n          c.LanguagesSpoken AS languagesSpoken,\n          c.Ethnicity AS ethnicity,\n          c.Religion AS religion,\n          c.CarerGenderPreference AS carerGenderPreference,\n          c.CarerNote AS carerNote,\n          c.EmergencyContactName AS emergencyContactName,\n          c.EmergencyContactPhone AS emergencyContactPhone,\n          c.EmergencyContactRelation AS emergencyContactRelation,\n          c.PreferredContactMethod AS preferredContactMethod,\n          c.DNACPR AS dnacpr,\n          c.DoLSStatus AS dolsStatus,\n          c.Allergies AS allergies,\n          c.BloodType AS bloodType,\n          c.MedicalHistory AS medicalHistory,\n          c.AdmissionDate AS admissionDate,\n          c.NationalInsurance AS nationalInsurance,\n          c.PreferredDrink AS preferredDrink,\n          c.PrnMeds AS prnMeds,\n          ".concat(keyWorkerSelect, "\n          c.ClientType AS clientType,\n          c.RiskLevel AS riskLevel,\n          c.ActiveStatus AS activeStatus,\n          c.DischargeDate AS dischargeDate,\n          c.ModifiedDate AS modifiedDate,\n          c.Address AS address\n        FROM People.Clients c\n        WHERE c.CompanyID = @companyId\n          AND c.ClientID = @clientId\n      "), { companyId: companyId }))];
+                case 4:
                     rows = (_a.sent()).recordset;
                     return [2 /*return*/, rows[0] ? mapServiceUserRow(rows[0]) : null];
             }
@@ -1349,12 +1483,15 @@ function loadCompanyServiceUserById(companyId, clientId) {
 function updateCompanyServiceUser(companyId, clientId, payload) {
     return __awaiter(this, void 0, void 0, function () {
         var existing, nextFirstName, nextLastName, hasKeyWorker, nextClientType, nextActiveStatus, nextDischargeDate, pool, request, keyWorkerUpdate, updated;
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29;
-        return __generator(this, function (_30) {
-            switch (_30.label) {
-                case 0: return [4 /*yield*/, loadCompanyServiceUserById(companyId, clientId)];
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, _33, _34, _35, _36, _37, _38, _39, _40, _41, _42, _43, _44, _45, _46, _47;
+        return __generator(this, function (_48) {
+            switch (_48.label) {
+                case 0: return [4 /*yield*/, ensureClientCareColumns()];
                 case 1:
-                    existing = _30.sent();
+                    _48.sent();
+                    return [4 /*yield*/, loadCompanyServiceUserById(companyId, clientId)];
+                case 2:
+                    existing = _48.sent();
                     if (!existing) {
                         throw Object.assign(new Error('Service user not found'), { code: 'P2025' });
                     }
@@ -1364,8 +1501,8 @@ function updateCompanyServiceUser(companyId, clientId, payload) {
                         throw Object.assign(new Error('First name and last name are required'), { code: 'VALIDATION_ERROR' });
                     }
                     return [4 /*yield*/, hasClientKeyWorkerColumn()];
-                case 2:
-                    hasKeyWorker = _30.sent();
+                case 3:
+                    hasKeyWorker = _48.sent();
                     nextClientType = (_f = (_e = payload.clientType) !== null && _e !== void 0 ? _e : existing.zone) !== null && _f !== void 0 ? _f : 'Community';
                     nextActiveStatus = (_h = (_g = payload.activeStatus) !== null && _g !== void 0 ? _g : existing.activeStatus) !== null && _h !== void 0 ? _h : true;
                     nextDischargeDate = payload.dischargeDate !== undefined
@@ -1374,9 +1511,9 @@ function updateCompanyServiceUser(companyId, clientId, payload) {
                             ? null
                             : existing.dischargeDate || new Date().toISOString().slice(0, 10);
                     return [4 /*yield*/, getAzureSqlPool()];
-                case 3:
-                    pool = _30.sent();
-                    request = pool.request()
+                case 4:
+                    pool = _48.sent();
+                    request = scopedRequest(pool, { companyId: companyId })
                         .input('companyId', mssql.Int, companyId)
                         .input('clientId', mssql.Int, clientId)
                         .input('clientType', mssql.NVarChar(50), nextClientType)
@@ -1394,29 +1531,38 @@ function updateCompanyServiceUser(companyId, clientId, payload) {
                         .input('gpDetails', mssql.NVarChar(500), (_x = (_w = payload.gpDetails) !== null && _w !== void 0 ? _w : existing.gpDetails) !== null && _x !== void 0 ? _x : '')
                         .input('riskLevel', mssql.NVarChar(50), (_z = (_y = payload.riskLevel) !== null && _y !== void 0 ? _y : existing.riskLevel) !== null && _z !== void 0 ? _z : 'Low')
                         .input('fundingSource', mssql.NVarChar(100), (_1 = (_0 = payload.fundingSource) !== null && _0 !== void 0 ? _0 : existing.fundingSource) !== null && _1 !== void 0 ? _1 : '')
-                        .input('preferredName', mssql.NVarChar(100), (_3 = (_2 = payload.preferredName) !== null && _2 !== void 0 ? _2 : existing.preferredName) !== null && _3 !== void 0 ? _3 : '')
-                        .input('maritalStatus', mssql.NVarChar(50), (_5 = (_4 = payload.maritalStatus) !== null && _4 !== void 0 ? _4 : existing.maritalStatus) !== null && _5 !== void 0 ? _5 : '')
-                        .input('birthplace', mssql.NVarChar(100), (_7 = (_6 = payload.birthplace) !== null && _6 !== void 0 ? _6 : existing.birthplace) !== null && _7 !== void 0 ? _7 : '')
-                        .input('nationality', mssql.NVarChar(100), (_9 = (_8 = payload.nationality) !== null && _8 !== void 0 ? _8 : existing.nationality) !== null && _9 !== void 0 ? _9 : '')
-                        .input('languagesSpoken', mssql.NVarChar(500), (_11 = (_10 = payload.languagesSpoken) !== null && _10 !== void 0 ? _10 : existing.languagesSpoken) !== null && _11 !== void 0 ? _11 : '')
-                        .input('ethnicity', mssql.NVarChar(100), (_13 = (_12 = payload.ethnicity) !== null && _12 !== void 0 ? _12 : existing.ethnicity) !== null && _13 !== void 0 ? _13 : '')
-                        .input('religion', mssql.NVarChar(100), (_15 = (_14 = payload.religion) !== null && _14 !== void 0 ? _14 : existing.religion) !== null && _15 !== void 0 ? _15 : '')
-                        .input('carerGenderPreference', mssql.NVarChar(30), (_17 = (_16 = payload.carerGenderPreference) !== null && _16 !== void 0 ? _16 : existing.carerGenderPreference) !== null && _17 !== void 0 ? _17 : '')
-                        .input('carerNote', mssql.NVarChar(1000), (_19 = (_18 = payload.carerNote) !== null && _18 !== void 0 ? _18 : existing.carerNote) !== null && _19 !== void 0 ? _19 : '')
-                        .input('emergencyContactName', mssql.NVarChar(200), (_21 = (_20 = payload.emergencyContactName) !== null && _20 !== void 0 ? _20 : existing.emergencyContactName) !== null && _21 !== void 0 ? _21 : '')
-                        .input('emergencyContactPhone', mssql.NVarChar(30), (_23 = (_22 = payload.emergencyContactPhone) !== null && _22 !== void 0 ? _22 : existing.emergencyContactPhone) !== null && _23 !== void 0 ? _23 : '')
-                        .input('emergencyContactRelation', mssql.NVarChar(100), (_25 = (_24 = payload.emergencyContactRelation) !== null && _24 !== void 0 ? _24 : existing.emergencyContactRelation) !== null && _25 !== void 0 ? _25 : '')
-                        .input('preferredContactMethod', mssql.NVarChar(30), (_27 = (_26 = payload.preferredContactMethod) !== null && _26 !== void 0 ? _26 : existing.preferredContactMethod) !== null && _27 !== void 0 ? _27 : '');
+                        .input('dnacpr', mssql.NVarChar(50), (_3 = (_2 = payload.dnacpr) !== null && _2 !== void 0 ? _2 : existing.dnacpr) !== null && _3 !== void 0 ? _3 : '')
+                        .input('dolsStatus', mssql.NVarChar(100), (_5 = (_4 = payload.dolsStatus) !== null && _4 !== void 0 ? _4 : existing.dolsStatus) !== null && _5 !== void 0 ? _5 : '')
+                        .input('allergies', mssql.NVarChar(1000), (_7 = (_6 = payload.allergies) !== null && _6 !== void 0 ? _6 : existing.allergies) !== null && _7 !== void 0 ? _7 : '')
+                        .input('bloodType', mssql.NVarChar(10), (_9 = (_8 = payload.bloodType) !== null && _8 !== void 0 ? _8 : existing.bloodType) !== null && _9 !== void 0 ? _9 : '')
+                        .input('medicalHistory', mssql.NVarChar(2000), (_11 = (_10 = payload.medicalHistory) !== null && _10 !== void 0 ? _10 : existing.medicalHistory) !== null && _11 !== void 0 ? _11 : '')
+                        .input('admissionDate', mssql.Date, (_13 = (_12 = payload.admissionDate) !== null && _12 !== void 0 ? _12 : existing.admissionDate) !== null && _13 !== void 0 ? _13 : null)
+                        .input('nationalInsurance', mssql.NVarChar(20), (_15 = (_14 = payload.nationalInsurance) !== null && _14 !== void 0 ? _14 : existing.nationalInsurance) !== null && _15 !== void 0 ? _15 : '')
+                        .input('preferredDrink', mssql.NVarChar(100), (_17 = (_16 = payload.preferredDrink) !== null && _16 !== void 0 ? _16 : existing.preferredDrink) !== null && _17 !== void 0 ? _17 : '')
+                        .input('prnMeds', mssql.NVarChar(500), (_19 = (_18 = payload.prnMeds) !== null && _18 !== void 0 ? _18 : existing.prnMeds) !== null && _19 !== void 0 ? _19 : '')
+                        .input('preferredName', mssql.NVarChar(100), (_21 = (_20 = payload.preferredName) !== null && _20 !== void 0 ? _20 : existing.preferredName) !== null && _21 !== void 0 ? _21 : '')
+                        .input('maritalStatus', mssql.NVarChar(50), (_23 = (_22 = payload.maritalStatus) !== null && _22 !== void 0 ? _22 : existing.maritalStatus) !== null && _23 !== void 0 ? _23 : '')
+                        .input('birthplace', mssql.NVarChar(100), (_25 = (_24 = payload.birthplace) !== null && _24 !== void 0 ? _24 : existing.birthplace) !== null && _25 !== void 0 ? _25 : '')
+                        .input('nationality', mssql.NVarChar(100), (_27 = (_26 = payload.nationality) !== null && _26 !== void 0 ? _26 : existing.nationality) !== null && _27 !== void 0 ? _27 : '')
+                        .input('languagesSpoken', mssql.NVarChar(500), (_29 = (_28 = payload.languagesSpoken) !== null && _28 !== void 0 ? _28 : existing.languagesSpoken) !== null && _29 !== void 0 ? _29 : '')
+                        .input('ethnicity', mssql.NVarChar(100), (_31 = (_30 = payload.ethnicity) !== null && _30 !== void 0 ? _30 : existing.ethnicity) !== null && _31 !== void 0 ? _31 : '')
+                        .input('religion', mssql.NVarChar(100), (_33 = (_32 = payload.religion) !== null && _32 !== void 0 ? _32 : existing.religion) !== null && _33 !== void 0 ? _33 : '')
+                        .input('carerGenderPreference', mssql.NVarChar(30), (_35 = (_34 = payload.carerGenderPreference) !== null && _34 !== void 0 ? _34 : existing.carerGenderPreference) !== null && _35 !== void 0 ? _35 : '')
+                        .input('carerNote', mssql.NVarChar(1000), (_37 = (_36 = payload.carerNote) !== null && _36 !== void 0 ? _36 : existing.carerNote) !== null && _37 !== void 0 ? _37 : '')
+                        .input('emergencyContactName', mssql.NVarChar(200), (_39 = (_38 = payload.emergencyContactName) !== null && _38 !== void 0 ? _38 : existing.emergencyContactName) !== null && _39 !== void 0 ? _39 : '')
+                        .input('emergencyContactPhone', mssql.NVarChar(30), (_41 = (_40 = payload.emergencyContactPhone) !== null && _40 !== void 0 ? _40 : existing.emergencyContactPhone) !== null && _41 !== void 0 ? _41 : '')
+                        .input('emergencyContactRelation', mssql.NVarChar(100), (_43 = (_42 = payload.emergencyContactRelation) !== null && _42 !== void 0 ? _42 : existing.emergencyContactRelation) !== null && _43 !== void 0 ? _43 : '')
+                        .input('preferredContactMethod', mssql.NVarChar(30), (_45 = (_44 = payload.preferredContactMethod) !== null && _44 !== void 0 ? _44 : existing.preferredContactMethod) !== null && _45 !== void 0 ? _45 : '');
                     keyWorkerUpdate = hasKeyWorker ? 'KeyWorkerName = @keyWorkerName,' : '';
                     if (hasKeyWorker) {
-                        request.input('keyWorkerName', mssql.NVarChar(200), (_29 = (_28 = payload.keyWorker) !== null && _28 !== void 0 ? _28 : existing.keyWorker) !== null && _29 !== void 0 ? _29 : '');
+                        request.input('keyWorkerName', mssql.NVarChar(200), (_47 = (_46 = payload.keyWorker) !== null && _46 !== void 0 ? _46 : existing.keyWorker) !== null && _47 !== void 0 ? _47 : '');
                     }
-                    return [4 /*yield*/, request.query("\n      UPDATE People.Clients\n      SET\n        ClientType = @clientType,\n        ActiveStatus = @activeStatus,\n        DischargeDate = @dischargeDate,\n        FirstName = @firstName,\n        LastName = @lastName,\n        DateOfBirth = @dateOfBirth,\n        Gender = @gender,\n        Email = @email,\n        Phone = @phone,\n        MobilePhone = @mobilePhone,\n        Address = @address,\n        NHS_Number = @nhsNumber,\n        GP_Details = @gpDetails,\n        RiskLevel = @riskLevel,\n        FundingSource = @fundingSource,\n        PreferredName = @preferredName,\n        MaritalStatus = @maritalStatus,\n        Birthplace = @birthplace,\n        Nationality = @nationality,\n        LanguagesSpoken = @languagesSpoken,\n        Ethnicity = @ethnicity,\n        Religion = @religion,\n        CarerGenderPreference = @carerGenderPreference,\n        CarerNote = @carerNote,\n        EmergencyContactName = @emergencyContactName,\n        EmergencyContactPhone = @emergencyContactPhone,\n        EmergencyContactRelation = @emergencyContactRelation,\n        PreferredContactMethod = @preferredContactMethod,\n        ".concat(keyWorkerUpdate, "\n        ModifiedDate = SYSUTCDATETIME()\n      WHERE CompanyID = @companyId\n        AND ClientID = @clientId\n    "))];
-                case 4:
-                    _30.sent();
-                    return [4 /*yield*/, loadCompanyServiceUserById(companyId, clientId)];
+                    return [4 /*yield*/, request.query(withDbScope("\n      UPDATE People.Clients\n      SET\n        ClientType = @clientType,\n        ActiveStatus = @activeStatus,\n        DischargeDate = @dischargeDate,\n        FirstName = @firstName,\n        LastName = @lastName,\n        DateOfBirth = @dateOfBirth,\n        Gender = @gender,\n        Email = @email,\n        Phone = @phone,\n        MobilePhone = @mobilePhone,\n        Address = @address,\n        NHS_Number = @nhsNumber,\n        GP_Details = @gpDetails,\n        RiskLevel = @riskLevel,\n        FundingSource = @fundingSource,\n        DNACPR = @dnacpr,\n        DoLSStatus = @dolsStatus,\n        Allergies = @allergies,\n        BloodType = @bloodType,\n        MedicalHistory = @medicalHistory,\n        AdmissionDate = @admissionDate,\n        NationalInsurance = @nationalInsurance,\n        PreferredDrink = @preferredDrink,\n        PrnMeds = @prnMeds,\n        PreferredName = @preferredName,\n        MaritalStatus = @maritalStatus,\n        Birthplace = @birthplace,\n        Nationality = @nationality,\n        LanguagesSpoken = @languagesSpoken,\n        Ethnicity = @ethnicity,\n        Religion = @religion,\n        CarerGenderPreference = @carerGenderPreference,\n        CarerNote = @carerNote,\n        EmergencyContactName = @emergencyContactName,\n        EmergencyContactPhone = @emergencyContactPhone,\n        EmergencyContactRelation = @emergencyContactRelation,\n        PreferredContactMethod = @preferredContactMethod,\n        ".concat(keyWorkerUpdate, "\n        ModifiedDate = SYSUTCDATETIME()\n      WHERE CompanyID = @companyId\n        AND ClientID = @clientId\n    "), { companyId: companyId }))];
                 case 5:
-                    updated = _30.sent();
+                    _48.sent();
+                    return [4 /*yield*/, loadCompanyServiceUserById(companyId, clientId)];
+                case 6:
+                    updated = _48.sent();
                     if (!updated) {
                         throw Object.assign(new Error('Unable to load updated service user'), { code: 'VALIDATION_ERROR' });
                     }
@@ -1462,12 +1608,12 @@ function loadCompanyUsers(companyId, userId) {
                     avatarSelect = includeAvatar
                         ? "ISNULL(NULLIF(s.AvatarUrl, N''), N'') AS avatarUrl,"
                         : "CAST(NULL AS NVARCHAR(MAX)) AS avatarUrl,";
-                    request = pool.request().input('companyId', mssql.Int, companyId);
+                    request = scopedRequest(pool, { companyId: companyId }).input('companyId', mssql.Int, companyId);
                     userFilter = typeof userId === 'number' ? 'AND ua.UserID = @userId' : '';
                     if (typeof userId === 'number') {
                         request.input('userId', mssql.Int, userId);
                     }
-                    return [4 /*yield*/, request.query("\n      SELECT\n        CAST(ua.UserID AS NVARCHAR(50)) AS id,\n        LTRIM(RTRIM(CONCAT(ISNULL(s.FirstName, N''), N' ', ISNULL(s.LastName, N'')))) AS name,\n        ".concat(avatarSelect, "\n        ISNULL(rolePick.RoleName, N'Carer') AS role,\n        CASE\n          WHEN ISNULL(ua.AccountStatus, N'Active') = N'Active' AND ISNULL(s.ActiveStatus, 1) = 1\n            THEN N'active'\n          ELSE N'inactive'\n        END AS status,\n        ISNULL(NULLIF(managerPick.ManagerName, N''), N'Unassigned') AS lineManager,\n        ISNULL(NULLIF(s.Email, N''), ua.Username) AS email,\n        ISNULL(NULLIF(s.MobilePhone, N''), ISNULL(NULLIF(s.Phone, N''), N'')) AS phone,\n        CASE\n          WHEN EXISTS (\n            SELECT 1\n            FROM Auth.UserRoleAssignment ura2\n            INNER JOIN Auth.UserRole ur2\n              ON ur2.RoleID = ura2.RoleID\n             AND ur2.CompanyID = ura2.CompanyID\n            WHERE ura2.UserID = ua.UserID\n              AND ura2.CompanyID = ua.CompanyID\n              AND ISNULL(ur2.IsActive, 1) = 1\n              AND ur2.RoleName IN (N'Line Manager', N'Manager')\n          ) THEN 1\n          ELSE 0\n        END AS isLineManager\n      FROM Auth.UserAccount ua\n      LEFT JOIN People.Staff s ON s.StaffID = ua.StaffID\n      OUTER APPLY (\n        SELECT TOP 1 ur.RoleName\n        FROM Auth.UserRoleAssignment ura\n        INNER JOIN Auth.UserRole ur\n          ON ur.RoleID = ura.RoleID\n         AND ur.CompanyID = ura.CompanyID\n        WHERE ura.UserID = ua.UserID\n          AND ura.CompanyID = ua.CompanyID\n          AND (ura.ExpiryDate IS NULL OR ura.ExpiryDate >= CAST(SYSUTCDATETIME() AS date))\n          AND ISNULL(ur.IsActive, 1) = 1\n        ORDER BY ura.AssignedDate DESC, ura.AssignmentID DESC\n      ) rolePick\n      OUTER APPLY (\n        SELECT TOP 1 LTRIM(RTRIM(CONCAT(ISNULL(ms.FirstName, N''), N' ', ISNULL(ms.LastName, N'')))) AS ManagerName\n        FROM Auth.UserRoleAssignment mura\n        INNER JOIN Auth.UserRole mur\n          ON mur.RoleID = mura.RoleID\n         AND mur.CompanyID = mura.CompanyID\n        INNER JOIN Auth.UserAccount mua\n          ON mua.UserID = mura.UserID\n         AND mua.CompanyID = mura.CompanyID\n        LEFT JOIN People.Staff ms ON ms.StaffID = mua.StaffID\n        WHERE mura.CompanyID = ua.CompanyID\n          AND ISNULL(mur.IsActive, 1) = 1\n          AND mur.RoleName IN (N'Line Manager', N'Manager')\n        ORDER BY mura.AssignedDate DESC, mura.AssignmentID DESC\n      ) managerPick\n      WHERE ua.CompanyID = @companyId\n      ").concat(userFilter, "\n      ORDER BY name ASC\n    "))];
+                    return [4 /*yield*/, request.query(withDbScope("\n      SELECT\n        CAST(ua.UserID AS NVARCHAR(50)) AS id,\n        LTRIM(RTRIM(CONCAT(ISNULL(s.FirstName, N''), N' ', ISNULL(s.LastName, N'')))) AS name,\n        ".concat(avatarSelect, "\n        ISNULL(rolePick.RoleName, N'Carer') AS role,\n        CASE\n          WHEN ISNULL(ua.AccountStatus, N'Active') = N'Active' AND ISNULL(s.ActiveStatus, 1) = 1\n            THEN N'active'\n          ELSE N'inactive'\n        END AS status,\n        ISNULL(NULLIF(managerPick.ManagerName, N''), N'Unassigned') AS lineManager,\n        ISNULL(NULLIF(s.Email, N''), ua.Username) AS email,\n        ISNULL(NULLIF(s.MobilePhone, N''), ISNULL(NULLIF(s.Phone, N''), N'')) AS phone,\n        CASE\n          WHEN EXISTS (\n            SELECT 1\n            FROM Auth.UserRoleAssignment ura2\n            INNER JOIN Auth.UserRole ur2\n              ON ur2.RoleID = ura2.RoleID\n             AND ur2.CompanyID = ura2.CompanyID\n            WHERE ura2.UserID = ua.UserID\n              AND ura2.CompanyID = ua.CompanyID\n              AND ISNULL(ur2.IsActive, 1) = 1\n              AND ur2.RoleName IN (N'Line Manager', N'Manager')\n          ) THEN 1\n          ELSE 0\n        END AS isLineManager\n      FROM Auth.UserAccount ua\n      LEFT JOIN People.Staff s ON s.StaffID = ua.StaffID\n      OUTER APPLY (\n        SELECT TOP 1 ur.RoleName\n        FROM Auth.UserRoleAssignment ura\n        INNER JOIN Auth.UserRole ur\n          ON ur.RoleID = ura.RoleID\n         AND ur.CompanyID = ura.CompanyID\n        WHERE ura.UserID = ua.UserID\n          AND ura.CompanyID = ua.CompanyID\n          AND (ura.ExpiryDate IS NULL OR ura.ExpiryDate >= CAST(SYSUTCDATETIME() AS date))\n          AND ISNULL(ur.IsActive, 1) = 1\n        ORDER BY ura.AssignedDate DESC, ura.AssignmentID DESC\n      ) rolePick\n      OUTER APPLY (\n        SELECT TOP 1 LTRIM(RTRIM(CONCAT(ISNULL(ms.FirstName, N''), N' ', ISNULL(ms.LastName, N'')))) AS ManagerName\n        FROM Auth.UserRoleAssignment mura\n        INNER JOIN Auth.UserRole mur\n          ON mur.RoleID = mura.RoleID\n         AND mur.CompanyID = mura.CompanyID\n        INNER JOIN Auth.UserAccount mua\n          ON mua.UserID = mura.UserID\n         AND mua.CompanyID = mura.CompanyID\n        LEFT JOIN People.Staff ms ON ms.StaffID = mua.StaffID\n        WHERE mura.CompanyID = ua.CompanyID\n          AND ISNULL(mur.IsActive, 1) = 1\n          AND mur.RoleName IN (N'Line Manager', N'Manager')\n        ORDER BY mura.AssignedDate DESC, mura.AssignmentID DESC\n      ) managerPick\n      WHERE ua.CompanyID = @companyId\n      ").concat(userFilter, "\n      ORDER BY name ASC\n    "), { companyId: companyId }))];
                 case 3:
                     users = (_a.sent()).recordset.map(function (row) { return (__assign(__assign({}, row), { name: row.name || row.email || "User ".concat(row.id) })); });
                     return [2 /*return*/, users];
@@ -1514,14 +1660,17 @@ function createCompanyUser(session, payload) {
                     return [4 /*yield*/, tx.begin()];
                 case 2:
                     _e.sent();
-                    _e.label = 3;
+                    return [4 /*yield*/, setTransactionCompanyScope(tx, session.companyId)];
                 case 3:
-                    _e.trys.push([3, 15, , 17]);
+                    _e.sent();
+                    _e.label = 4;
+                case 4:
+                    _e.trys.push([4, 16, , 18]);
                     return [4 /*yield*/, new mssql.Request(tx)
                             .input('companyId', mssql.Int, session.companyId)
                             .input('username', mssql.NVarChar(320), email)
                             .query("\n          SELECT TOP 1 ua.UserID AS userId\n          FROM Auth.UserAccount ua\n          WHERE ua.CompanyID = @companyId\n            AND LOWER(ua.Username) = LOWER(@username)\n        ")];
-                case 4:
+                case 5:
                     duplicateRows = (_e.sent()).recordset;
                     if (duplicateRows.length > 0) {
                         throw Object.assign(new Error('A user with this email already exists'), { code: 'VALIDATION_ERROR' });
@@ -1530,7 +1679,7 @@ function createCompanyUser(session, payload) {
                     _b = normalizeStatus(payload.status), accountStatus = _b.accountStatus, isActive = _b.isActive;
                     roleNames = uniqueSorted(__spreadArray([payload.role], (payload.isLineManager ? ['Line Manager'] : []), true));
                     return [4 /*yield*/, hasStaffAvatarColumn()];
-                case 5:
+                case 6:
                     includeAvatar = _e.sent();
                     staffRequest = new mssql.Request(tx)
                         .input('companyId', mssql.Int, session.companyId)
@@ -1543,7 +1692,7 @@ function createCompanyUser(session, payload) {
                         staffRequest.input('avatarUrl', mssql.NVarChar(mssql.MAX), payload.avatarUrl || '');
                     }
                     return [4 /*yield*/, staffRequest.query("\n          INSERT INTO People.Staff (".concat(includeAvatar ? 'CompanyID, FirstName, LastName, Email, MobilePhone, Phone, ActiveStatus, AvatarUrl' : 'CompanyID, FirstName, LastName, Email, MobilePhone, Phone, ActiveStatus', ")\n          VALUES (").concat(includeAvatar ? '@companyId, @firstName, @lastName, @email, @phone, @phone, @isActive, @avatarUrl' : '@companyId, @firstName, @lastName, @email, @phone, @phone, @isActive', ");\n          SELECT CAST(SCOPE_IDENTITY() AS INT) AS staffId;\n        "))];
-                case 6:
+                case 7:
                     staffRows = (_e.sent()).recordset;
                     staffId = (_c = staffRows[0]) === null || _c === void 0 ? void 0 : _c.staffId;
                     if (!staffId) {
@@ -1555,50 +1704,50 @@ function createCompanyUser(session, payload) {
                             .input('username', mssql.NVarChar(320), email)
                             .input('accountStatus', mssql.NVarChar(64), accountStatus)
                             .query("\n          INSERT INTO Auth.UserAccount (CompanyID, StaffID, Username, AccountStatus, AuthProvider, EntraObjectID, LastModifiedDate)\n          VALUES (@companyId, @staffId, @username, @accountStatus, N'Microsoft', NULL, SYSUTCDATETIME());\n          SELECT CAST(SCOPE_IDENTITY() AS INT) AS userId;\n        ")];
-                case 7:
+                case 8:
                     userRows = (_e.sent()).recordset;
                     userId = (_d = userRows[0]) === null || _d === void 0 ? void 0 : _d.userId;
                     if (!userId) {
                         throw Object.assign(new Error('Failed to create user account record'), { code: 'VALIDATION_ERROR' });
                     }
                     _i = 0, roleNames_1 = roleNames;
-                    _e.label = 8;
-                case 8:
-                    if (!(_i < roleNames_1.length)) return [3 /*break*/, 12];
+                    _e.label = 9;
+                case 9:
+                    if (!(_i < roleNames_1.length)) return [3 /*break*/, 13];
                     roleName = roleNames_1[_i];
                     return [4 /*yield*/, resolveRoleId(tx, session.companyId, roleName)];
-                case 9:
+                case 10:
                     roleId = _e.sent();
                     if (!roleId)
-                        return [3 /*break*/, 11];
+                        return [3 /*break*/, 12];
                     return [4 /*yield*/, new mssql.Request(tx)
                             .input('userId', mssql.Int, userId)
                             .input('companyId', mssql.Int, session.companyId)
                             .input('roleId', mssql.Int, roleId)
                             .query("\n          INSERT INTO Auth.UserRoleAssignment (UserID, CompanyID, RoleID, AssignedDate, ExpiryDate)\n          VALUES (@userId, @companyId, @roleId, CAST(SYSUTCDATETIME() AS date), NULL);\n        ")];
-                case 10:
-                    _e.sent();
-                    _e.label = 11;
                 case 11:
+                    _e.sent();
+                    _e.label = 12;
+                case 12:
                     _i++;
-                    return [3 /*break*/, 8];
-                case 12: return [4 /*yield*/, tx.commit()];
-                case 13:
+                    return [3 /*break*/, 9];
+                case 13: return [4 /*yield*/, tx.commit()];
+                case 14:
                     _e.sent();
                     return [4 /*yield*/, loadCompanyUsers(session.companyId, userId)];
-                case 14:
+                case 15:
                     created = _e.sent();
                     if (!created[0]) {
                         throw Object.assign(new Error('Created user could not be loaded'), { code: 'VALIDATION_ERROR' });
                     }
                     return [2 /*return*/, created[0]];
-                case 15:
+                case 16:
                     error_1 = _e.sent();
                     return [4 /*yield*/, tx.rollback()];
-                case 16:
+                case 17:
                     _e.sent();
                     throw error_1;
-                case 17: return [2 /*return*/];
+                case 18: return [2 /*return*/];
             }
         });
     });
@@ -1624,14 +1773,17 @@ function updateCompanyUser(session, userId, payload) {
                     return [4 /*yield*/, tx.begin()];
                 case 2:
                     _c.sent();
-                    _c.label = 3;
+                    return [4 /*yield*/, setTransactionCompanyScope(tx, session.companyId)];
                 case 3:
-                    _c.trys.push([3, 17, , 19]);
+                    _c.sent();
+                    _c.label = 4;
+                case 4:
+                    _c.trys.push([4, 18, , 20]);
                     return [4 /*yield*/, new mssql.Request(tx)
                             .input('companyId', mssql.Int, session.companyId)
                             .input('userId', mssql.Int, userId)
                             .query("\n          SELECT TOP 1 ua.StaffID AS staffId\n          FROM Auth.UserAccount ua\n          WHERE ua.CompanyID = @companyId\n            AND ua.UserID = @userId\n        ")];
-                case 4:
+                case 5:
                     existingRows = (_c.sent()).recordset;
                     if (existingRows.length === 0) {
                         throw Object.assign(new Error('User not found'), { code: 'P2025' });
@@ -1640,9 +1792,9 @@ function updateCompanyUser(session, userId, payload) {
                     _a = splitName(payload.name || email), firstName = _a.firstName, lastName = _a.lastName;
                     _b = normalizeStatus(payload.status), accountStatus = _b.accountStatus, isActive = _b.isActive;
                     return [4 /*yield*/, hasStaffAvatarColumn()];
-                case 5:
+                case 6:
                     includeAvatar = _c.sent();
-                    if (!staffId) return [3 /*break*/, 7];
+                    if (!staffId) return [3 /*break*/, 8];
                     staffRequest = new mssql.Request(tx)
                         .input('staffId', mssql.Int, staffId)
                         .input('firstName', mssql.NVarChar(128), firstName)
@@ -1654,62 +1806,62 @@ function updateCompanyUser(session, userId, payload) {
                         staffRequest.input('avatarUrl', mssql.NVarChar(mssql.MAX), payload.avatarUrl || '');
                     }
                     return [4 /*yield*/, staffRequest.query("\n          UPDATE People.Staff\n          SET FirstName = @firstName,\n              LastName = @lastName,\n              Email = @email,\n              MobilePhone = @phone,\n              Phone = @phone,\n              ActiveStatus = @isActive\n              ".concat(includeAvatar ? ', AvatarUrl = @avatarUrl' : '', "\n          WHERE StaffID = @staffId\n        "))];
-                case 6:
+                case 7:
                     _c.sent();
-                    _c.label = 7;
-                case 7: return [4 /*yield*/, new mssql.Request(tx)
+                    _c.label = 8;
+                case 8: return [4 /*yield*/, new mssql.Request(tx)
                         .input('companyId', mssql.Int, session.companyId)
                         .input('userId', mssql.Int, userId)
                         .input('username', mssql.NVarChar(320), email)
                         .input('accountStatus', mssql.NVarChar(64), accountStatus)
                         .query("\n        UPDATE Auth.UserAccount\n        SET Username = @username,\n            AccountStatus = @accountStatus,\n            LastModifiedDate = SYSUTCDATETIME()\n        WHERE CompanyID = @companyId\n          AND UserID = @userId\n      ")];
-                case 8:
+                case 9:
                     _c.sent();
                     return [4 /*yield*/, new mssql.Request(tx)
                             .input('companyId', mssql.Int, session.companyId)
                             .input('userId', mssql.Int, userId)
                             .query("\n        UPDATE ura\n        SET ExpiryDate = CAST(SYSUTCDATETIME() AS date)\n        FROM Auth.UserRoleAssignment ura\n        WHERE ura.CompanyID = @companyId\n          AND ura.UserID = @userId\n          AND (ura.ExpiryDate IS NULL OR ura.ExpiryDate >= CAST(SYSUTCDATETIME() AS date))\n      ")];
-                case 9:
+                case 10:
                     _c.sent();
                     roleNames = uniqueSorted(__spreadArray([payload.role], (payload.isLineManager ? ['Line Manager'] : []), true));
                     _i = 0, roleNames_2 = roleNames;
-                    _c.label = 10;
-                case 10:
-                    if (!(_i < roleNames_2.length)) return [3 /*break*/, 14];
+                    _c.label = 11;
+                case 11:
+                    if (!(_i < roleNames_2.length)) return [3 /*break*/, 15];
                     roleName = roleNames_2[_i];
                     return [4 /*yield*/, resolveRoleId(tx, session.companyId, roleName)];
-                case 11:
+                case 12:
                     roleId = _c.sent();
                     if (!roleId)
-                        return [3 /*break*/, 13];
+                        return [3 /*break*/, 14];
                     return [4 /*yield*/, new mssql.Request(tx)
                             .input('companyId', mssql.Int, session.companyId)
                             .input('userId', mssql.Int, userId)
                             .input('roleId', mssql.Int, roleId)
                             .query("\n          INSERT INTO Auth.UserRoleAssignment (UserID, CompanyID, RoleID, AssignedDate, ExpiryDate)\n          VALUES (@userId, @companyId, @roleId, CAST(SYSUTCDATETIME() AS date), NULL);\n        ")];
-                case 12:
-                    _c.sent();
-                    _c.label = 13;
                 case 13:
+                    _c.sent();
+                    _c.label = 14;
+                case 14:
                     _i++;
-                    return [3 /*break*/, 10];
-                case 14: return [4 /*yield*/, tx.commit()];
-                case 15:
+                    return [3 /*break*/, 11];
+                case 15: return [4 /*yield*/, tx.commit()];
+                case 16:
                     _c.sent();
                     return [4 /*yield*/, loadCompanyUsers(session.companyId, userId)];
-                case 16:
+                case 17:
                     updated = _c.sent();
                     if (!updated[0]) {
                         throw Object.assign(new Error('Updated user could not be loaded'), { code: 'P2025' });
                     }
                     return [2 /*return*/, updated[0]];
-                case 17:
+                case 18:
                     error_2 = _c.sent();
                     return [4 /*yield*/, tx.rollback()];
-                case 18:
+                case 19:
                     _c.sent();
                     throw error_2;
-                case 19: return [2 /*return*/];
+                case 20: return [2 /*return*/];
             }
         });
     });
@@ -1805,24 +1957,24 @@ function exchangeMicrosoftToken(idToken) {
                     return [4 /*yield*/, getAzureSqlPool()];
                 case 2:
                     pool = _a.sent();
-                    return [4 /*yield*/, pool.request()
+                    return [4 /*yield*/, scopedRequest(pool, { isSuperAdmin: true })
                             .input('tenantId', mssql.NVarChar(128), entraTenantId)
                             .input('objectId', mssql.NVarChar(128), entraObjectId)
-                            .query("\n        SELECT TOP 1\n          ua.UserID AS userId,\n          ua.CompanyID AS companyId,\n          ua.StaffID AS staffId,\n          ua.Username AS username,\n          ua.AccountStatus AS accountStatus,\n          s.FirstName AS firstName,\n          s.LastName AS lastName,\n          s.Email AS staffEmail,\n          c.CompanyName AS companyName\n        FROM Auth.UserAccount ua\n        INNER JOIN People.Company c ON c.CompanyID = ua.CompanyID\n        LEFT JOIN People.Staff s ON s.StaffID = ua.StaffID\n        WHERE c.EntraTenantID = @tenantId\n          AND ua.EntraObjectID = @objectId\n          AND ISNULL(c.ActiveStatus, 1) = 1\n          AND ISNULL(ua.AccountStatus, N'Active') = N'Active'\n      ")];
+                            .query(withDbScope("\n        SELECT TOP 1\n          ua.UserID AS userId,\n          ua.CompanyID AS companyId,\n          ua.StaffID AS staffId,\n          ua.Username AS username,\n          ua.AccountStatus AS accountStatus,\n          s.FirstName AS firstName,\n          s.LastName AS lastName,\n          s.Email AS staffEmail,\n          c.CompanyName AS companyName\n        FROM Auth.UserAccount ua\n        INNER JOIN People.Company c ON c.CompanyID = ua.CompanyID\n        LEFT JOIN People.Staff s ON s.StaffID = ua.StaffID\n        WHERE c.EntraTenantID = @tenantId\n          AND ua.EntraObjectID = @objectId\n          AND ISNULL(c.ActiveStatus, 1) = 1\n          AND ISNULL(ua.AccountStatus, N'Active') = N'Active'\n      ", { isSuperAdmin: true }))];
                 case 3:
                     matchedRows = (_a.sent()).recordset;
                     if (!(matchedRows.length === 0 && loginEmail)) return [3 /*break*/, 6];
-                    return [4 /*yield*/, pool.request()
+                    return [4 /*yield*/, scopedRequest(pool, { isSuperAdmin: true })
                             .input('tenantId', mssql.NVarChar(128), entraTenantId)
                             .input('email', mssql.NVarChar(320), loginEmail)
-                            .query("\n          SELECT TOP 1\n            ua.UserID AS userId,\n            ua.CompanyID AS companyId,\n            ua.StaffID AS staffId,\n            ua.Username AS username,\n            ua.AccountStatus AS accountStatus,\n            s.FirstName AS firstName,\n            s.LastName AS lastName,\n            s.Email AS staffEmail,\n            c.CompanyName AS companyName\n          FROM Auth.UserAccount ua\n          INNER JOIN People.Company c ON c.CompanyID = ua.CompanyID\n          LEFT JOIN People.Staff s ON s.StaffID = ua.StaffID\n          WHERE c.EntraTenantID = @tenantId\n            AND LOWER(ua.Username) = LOWER(@email)\n            AND ISNULL(c.ActiveStatus, 1) = 1\n            AND ISNULL(ua.AccountStatus, N'Active') = N'Active'\n        ")];
+                            .query(withDbScope("\n          SELECT TOP 1\n            ua.UserID AS userId,\n            ua.CompanyID AS companyId,\n            ua.StaffID AS staffId,\n            ua.Username AS username,\n            ua.AccountStatus AS accountStatus,\n            s.FirstName AS firstName,\n            s.LastName AS lastName,\n            s.Email AS staffEmail,\n            c.CompanyName AS companyName\n          FROM Auth.UserAccount ua\n          INNER JOIN People.Company c ON c.CompanyID = ua.CompanyID\n          LEFT JOIN People.Staff s ON s.StaffID = ua.StaffID\n          WHERE c.EntraTenantID = @tenantId\n            AND LOWER(ua.Username) = LOWER(@email)\n            AND ISNULL(c.ActiveStatus, 1) = 1\n            AND ISNULL(ua.AccountStatus, N'Active') = N'Active'\n        ", { isSuperAdmin: true }))];
                 case 4:
                     matchedRows = (_a.sent()).recordset;
                     if (!(matchedRows.length > 0)) return [3 /*break*/, 6];
-                    return [4 /*yield*/, pool.request()
+                    return [4 /*yield*/, scopedRequest(pool, { isSuperAdmin: true })
                             .input('objectId', mssql.NVarChar(128), entraObjectId)
                             .input('userId', mssql.Int, matchedRows[0].userId)
-                            .query("\n          UPDATE Auth.UserAccount\n          SET EntraObjectID = @objectId,\n              AuthProvider = N'Microsoft',\n              LastModifiedDate = SYSUTCDATETIME()\n          WHERE UserID = @userId\n            AND (EntraObjectID IS NULL OR EntraObjectID = N'')\n        ")];
+                            .query(withDbScope("\n          UPDATE Auth.UserAccount\n          SET EntraObjectID = @objectId,\n              AuthProvider = N'Microsoft',\n              LastModifiedDate = SYSUTCDATETIME()\n          WHERE UserID = @userId\n            AND (EntraObjectID IS NULL OR EntraObjectID = N'')\n        ", { isSuperAdmin: true }))];
                 case 5:
                     _a.sent();
                     _a.label = 6;
@@ -1831,10 +1983,10 @@ function exchangeMicrosoftToken(idToken) {
                         throw Object.assign(new Error('No matching user account for this tenant'), { code: 'AUTH_NOT_MAPPED' });
                     }
                     user = matchedRows[0];
-                    return [4 /*yield*/, pool.request()
+                    return [4 /*yield*/, scopedRequest(pool, { companyId: user.companyId })
                             .input('userId', mssql.Int, user.userId)
                             .input('companyId', mssql.Int, user.companyId)
-                            .query("\n        SELECT ur.RoleName AS roleName\n        FROM Auth.UserRoleAssignment ura\n        INNER JOIN Auth.UserRole ur\n          ON ur.RoleID = ura.RoleID\n         AND ur.CompanyID = ura.CompanyID\n        WHERE ura.UserID = @userId\n          AND ura.CompanyID = @companyId\n          AND (ura.ExpiryDate IS NULL OR ura.ExpiryDate >= CAST(SYSUTCDATETIME() AS date))\n          AND ISNULL(ur.IsActive, 1) = 1\n      ")];
+                            .query(withDbScope("\n        SELECT ur.RoleName AS roleName\n        FROM Auth.UserRoleAssignment ura\n        INNER JOIN Auth.UserRole ur\n          ON ur.RoleID = ura.RoleID\n         AND ur.CompanyID = ura.CompanyID\n        WHERE ura.UserID = @userId\n          AND ura.CompanyID = @companyId\n          AND (ura.ExpiryDate IS NULL OR ura.ExpiryDate >= CAST(SYSUTCDATETIME() AS date))\n          AND ISNULL(ur.IsActive, 1) = 1\n      ", { companyId: user.companyId }))];
                 case 7:
                     rolesRows = (_a.sent()).recordset;
                     roles = uniqueSorted(rolesRows.map(function (role) { return readString(role.roleName); }));

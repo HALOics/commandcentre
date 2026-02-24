@@ -361,6 +361,15 @@ export async function createServiceUser(input: {
   gpDetails?: string;
   riskLevel?: string;
   fundingSource?: string;
+  dnacpr?: string;
+  dolsStatus?: string;
+  allergies?: string;
+  bloodType?: string;
+  medicalHistory?: string;
+  admissionDate?: string;
+  nationalInsurance?: string;
+  preferredDrink?: string;
+  prnMeds?: string;
   activeStatus?: boolean;
   dischargeDate?: string;
 }): Promise<ServiceUser> {
@@ -383,6 +392,15 @@ export async function createServiceUser(input: {
     gpDetails: (input.gpDetails || "").trim(),
     riskLevel: (input.riskLevel || "Low").trim(),
     fundingSource: (input.fundingSource || "").trim(),
+    dnacpr: (input.dnacpr || "").trim(),
+    dolsStatus: (input.dolsStatus || "").trim(),
+    allergies: (input.allergies || "").trim(),
+    bloodType: (input.bloodType || "").trim(),
+    medicalHistory: (input.medicalHistory || "").trim(),
+    admissionDate: (input.admissionDate || "").trim(),
+    nationalInsurance: (input.nationalInsurance || "").trim(),
+    preferredDrink: (input.preferredDrink || "").trim(),
+    prnMeds: (input.prnMeds || "").trim(),
     activeStatus: input.activeStatus ?? true,
     dischargeDate: (input.dischargeDate || "").trim()
   };
@@ -417,6 +435,15 @@ export async function updateServiceUser(
     gpDetails?: string;
     riskLevel?: string;
     fundingSource?: string;
+    dnacpr?: string;
+    dolsStatus?: string;
+    allergies?: string;
+    bloodType?: string;
+    medicalHistory?: string;
+    admissionDate?: string;
+    nationalInsurance?: string;
+    preferredDrink?: string;
+    prnMeds?: string;
     preferredName?: string;
     maritalStatus?: string;
     birthplace?: string;
@@ -454,6 +481,15 @@ export async function updateServiceUser(
     gpDetails: input.gpDetails?.trim(),
     riskLevel: input.riskLevel?.trim(),
     fundingSource: input.fundingSource?.trim(),
+    dnacpr: input.dnacpr?.trim(),
+    dolsStatus: input.dolsStatus?.trim(),
+    allergies: input.allergies?.trim(),
+    bloodType: input.bloodType?.trim(),
+    medicalHistory: input.medicalHistory?.trim(),
+    admissionDate: input.admissionDate?.trim(),
+    nationalInsurance: input.nationalInsurance?.trim(),
+    preferredDrink: input.preferredDrink?.trim(),
+    prnMeds: input.prnMeds?.trim(),
     preferredName: input.preferredName?.trim(),
     maritalStatus: input.maritalStatus?.trim(),
     birthplace: input.birthplace?.trim(),
