@@ -5,11 +5,11 @@ import moodGoodIcon from "../assets/moods/mood_good.png";
 import moodNeutralIcon from "../assets/moods/mood_neutral.png";
 import moodLowIcon from "../assets/moods/mood_low.png";
 import moodLowestIcon from "../assets/moods/mood_lowest.png";
-import { loadServiceUsers } from "../data/dbClient";
+import { createServiceUser, loadServiceUsers, loadTeamUsers, updateServiceUser } from "../data/dbClient";
 import {
-  mockServiceUsers,
   type MoodLevel,
   type ServiceUser,
+  type TeamUser,
   type UserFlag,
   type UserStatus
 } from "../mock/store";
@@ -44,6 +44,14 @@ type DocumentItem = {
   title: string;
   category: string;
   updated: string;
+};
+
+type AddressParts = {
+  line1: string;
+  street: string;
+  city: string;
+  county: string;
+  postcode: string;
 };
 
 type ServiceUserProfileData = {
@@ -141,6 +149,10 @@ const profileMenuGroups: Array<{ heading: string; items: Array<{ id: ProfilePane
   }
 ];
 
+const definedBuildingZones = ["Maple House", "Harbor Court", "Cedar Lodge", "Orchard View", "Orbit Place"];
+const zoneSelectOptions = ["Community", ...definedBuildingZones];
+const supportTierOptions = ["Enhanced", "Standard", "Light"] as const;
+
 const dateOfBirthSeeds = [
   "1989-05-16",
   "1991-11-03",
@@ -169,81 +181,6 @@ const genderSeeds = [
   "Male",
   "Male",
   "Female"
-];
-
-const nationalitySeeds = [
-  "British",
-  "Irish",
-  "Polish",
-  "American",
-  "Canadian",
-  "Australian",
-  "South African",
-  "Indian",
-  "Pakistani",
-  "Nigerian",
-  "Spanish",
-  "Italian"
-];
-
-const ethnicitySeeds = [
-  "White British",
-  "Irish",
-  "Polish",
-  "Black African",
-  "Black Caribbean",
-  "Asian Indian",
-  "Asian Pakistani",
-  "Mixed",
-  "Other European",
-  "White British",
-  "Black African",
-  "Asian Bangladeshi"
-];
-
-const languageSeeds = [
-  ["English"],
-  ["English", "ASL"],
-  ["English", "Polish"],
-  ["English"],
-  ["English", "French"],
-  ["English"],
-  ["English", "British Sign Language"],
-  ["English", "Hindi"],
-  ["English", "Urdu"],
-  ["English", "Yoruba"],
-  ["English", "Spanish"],
-  ["English", "Italian"]
-];
-
-const maritalStatusSeeds = [
-  "Single",
-  "Married",
-  "Single",
-  "Partnered",
-  "Single",
-  "Married",
-  "Partnered",
-  "Single",
-  "Single",
-  "Married",
-  "Single",
-  "Partnered"
-];
-
-const birthplaceSeeds = [
-  "Portsmouth",
-  "Southampton",
-  "Brighton",
-  "Leeds",
-  "Bristol",
-  "Cardiff",
-  "Reading",
-  "Nottingham",
-  "Birmingham",
-  "York",
-  "Plymouth",
-  "Oxford"
 ];
 
 const bloodTypeSeeds = ["A+", "O+", "B+", "AB+", "O-", "A-", "B-", "A+", "O+", "AB-", "B+", "A+"];
@@ -438,6 +375,9 @@ function getAge(isoDate: string): number {
 
 function formatLongDate(isoDate: string): string {
   const date = new Date(`${isoDate}T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return isoDate;
+  }
   return date.toLocaleDateString("en-GB", {
     day: "numeric",
     month: "long",
@@ -450,23 +390,61 @@ function makePhone(index: number, seed: number): string {
   return `+44 20 7000 ${lastDigits}`;
 }
 
+function parseAddressParts(address: string | undefined): AddressParts {
+  const chunks = (address || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  return {
+    line1: chunks[0] || "",
+    street: chunks[1] || "",
+    city: chunks[2] || "",
+    county: chunks[3] || "",
+    postcode: chunks[4] || ""
+  };
+}
+
+function formatAddressParts(parts: AddressParts): string {
+  return [parts.line1, parts.street, parts.city, parts.county, parts.postcode]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function supportTierFromRiskLevel(riskLevel: string): "Enhanced" | "Standard" | "Light" {
+  const normalized = riskLevel.trim().toLowerCase();
+  if (normalized === "high") return "Enhanced";
+  if (normalized === "medium") return "Standard";
+  return "Light";
+}
+
+function riskLevelFromSupportTier(tier: "Enhanced" | "Standard" | "Light"): "High" | "Medium" | "Low" {
+  if (tier === "Enhanced") return "High";
+  if (tier === "Standard") return "Medium";
+  return "Low";
+}
+
 function buildProfileData(serviceUser: ServiceUser, serviceUsers: ServiceUser[]): ServiceUserProfileData {
   const index = Math.max(0, serviceUsers.findIndex((entry) => entry.id === serviceUser.id));
-  const dateOfBirth = seedAt(dateOfBirthSeeds, index);
+  const firstName = serviceUser.firstName || serviceUser.name.split(" ")[0] || "";
+  const lastName = serviceUser.lastName || serviceUser.name.split(" ").slice(1).join(" ");
+  const dateOfBirth = serviceUser.dateOfBirth || seedAt(dateOfBirthSeeds, index);
   const age = getAge(dateOfBirth);
-  const gender = seedAt(genderSeeds, index);
-  const maritalStatus = seedAt(maritalStatusSeeds, index);
-  const birthplace = seedAt(birthplaceSeeds, index);
+  const gender = serviceUser.gender || seedAt(genderSeeds, index);
+  const maritalStatus = serviceUser.maritalStatus || "";
+  const birthplace = serviceUser.birthplace || "";
   const bloodType = seedAt(bloodTypeSeeds, index);
-  const fundingSource = seedAt(fundingSourceSeeds, index);
+  const fundingSource = serviceUser.fundingSource || seedAt(fundingSourceSeeds, index);
   const familyContact = seedAt(familyContactSeeds, index);
   const clinicalLead = seedAt(clinicalLeadSeeds, index);
-  const homeAddress = seedAt(addressSeeds, index);
+  const homeAddress = serviceUser.address || seedAt(addressSeeds, index);
   const aboutMe = seedAt(aboutMeSeeds, index);
   const futurePlans = seedAt(futurePlanSeeds, index);
-  const firstName = serviceUser.name.split(" ")[0];
 
-  const nhsNumber = `${410 + index} ${String(230 + index * 7).padStart(3, "0")} ${String(1200 + index * 13).slice(-4)}`;
+  const nhsNumber =
+    serviceUser.nhsNumber ||
+    `${410 + index} ${String(230 + index * 7).padStart(3, "0")} ${String(1200 + index * 13).slice(-4)}`;
   const nationalInsurance = `JC${String(490000 + index * 149).slice(-6)}${String.fromCharCode(65 + (index % 26))}`;
   const profileScore = `${88 + (index % 8)}%`;
 
@@ -513,20 +491,28 @@ const careInfo: ProfileField[] = [
   ];
 
   const contactInfo: ProfileField[] = [
-    { label: "Primary phone", value: makePhone(index, 13) },
-    { label: "Preferred contact", value: "Mobile first" },
-    { label: "Email", value: `${firstName.toLowerCase()}.${serviceUser.id}@service.halo.mock` },
-    { label: "Address", value: homeAddress },
-    { label: "Emergency contact", value: familyContact },
-    { label: "Emergency phone", value: makePhone(index, 37) }
+    { label: "Primary phone", value: serviceUser.phone || serviceUser.mobilePhone || "Not recorded" },
+    {
+      label: "Preferred contact",
+      value:
+        serviceUser.preferredContactMethod ||
+        (serviceUser.mobilePhone ? "Text" : serviceUser.phone ? "Call" : serviceUser.email ? "Text" : "Not recorded")
+    },
+    { label: "Email", value: serviceUser.email || "Not recorded" },
+    { label: "Address", value: homeAddress || "Not recorded" },
+    { label: "Emergency contact", value: serviceUser.emergencyContactName || "Not recorded" },
+    { label: "Emergency phone", value: serviceUser.emergencyContactPhone || "Not recorded" }
   ];
 
-  const nationality = seedAt(nationalitySeeds, index);
-  const languages = seedAt(languageSeeds, index);
-  const ethnicity = seedAt(ethnicitySeeds, index);
-  const religion = index % 3 === 0 ? "Christian" : index % 3 === 1 ? "None stated" : "Muslim";
-  const carerGenderPreference = index % 2 === 0 ? "Female" : "Male";
-  const carerNote = index % 2 === 0 ? "Prefers consistent morning team" : "No specific preference";
+  const nationality = serviceUser.nationality || "";
+  const languages = (serviceUser.languagesSpoken || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const ethnicity = serviceUser.ethnicity || "";
+  const religion = serviceUser.religion || "";
+  const carerGenderPreference = serviceUser.carerGenderPreference || "";
+  const carerNote = serviceUser.carerNote || "";
 
   const importantPeople: ImportantContact[] = [
     { name: serviceUser.keyWorker, role: "Key worker", phone: makePhone(index, 21) },
@@ -571,9 +557,9 @@ const careInfo: ProfileField[] = [
   ];
 
   return {
-    preferredName: firstName,
+    preferredName: serviceUser.preferredName || firstName,
     firstName,
-    lastName: serviceUser.name.split(" ").slice(1).join(" ") || firstName,
+    lastName,
     gender,
     dateOfBirth,
     maritalStatus,
@@ -640,7 +626,9 @@ export default function PeoplePage() {
   const navigate = useNavigate();
   const { serviceUserId } = useParams<{ serviceUserId?: string }>();
 
-  const [serviceUsers, setServiceUsers] = useState<ServiceUser[]>(mockServiceUsers);
+  const [serviceUsers, setServiceUsers] = useState<ServiceUser[]>([]);
+  const [teamUsers, setTeamUsers] = useState<TeamUser[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilters, setStatusFilters] = useState<UserStatus[]>(["active"]);
   const [zoneFilters, setZoneFilters] = useState<string[]>([]);
@@ -661,7 +649,24 @@ export default function PeoplePage() {
   const [newDocTitle, setNewDocTitle] = useState("");
   const [newDocCategory, setNewDocCategory] = useState(documentCategories[0]);
   const [personalEditOpen, setPersonalEditOpen] = useState(false);
-  const [personalOverrides, setPersonalOverrides] = useState<Partial<ServiceUserProfileData>>({});
+  const [personalSaveError, setPersonalSaveError] = useState("");
+  const [isSavingPersonal, setIsSavingPersonal] = useState(false);
+  const [siteEditOpen, setSiteEditOpen] = useState(false);
+  const [siteSaveError, setSiteSaveError] = useState("");
+  const [isSavingSite, setIsSavingSite] = useState(false);
+  const [contactEditOpen, setContactEditOpen] = useState(false);
+  const [contactSaveError, setContactSaveError] = useState("");
+  const [isSavingContact, setIsSavingContact] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [createForm, setCreateForm] = useState({
+    firstName: "",
+    lastName: "",
+    clientType: "Community",
+    riskLevel: "Low",
+    activeStatus: true
+  });
   const [personalForm, setPersonalForm] = useState({
     preferredName: "",
     firstName: "",
@@ -676,6 +681,27 @@ export default function PeoplePage() {
     religion: "",
     carerGenderPreference: "",
     carerNote: ""
+  });
+  const [contactForm, setContactForm] = useState({
+    email: "",
+    phone: "",
+    mobilePhone: "",
+    line1: "",
+    street: "",
+    city: "",
+    county: "",
+    postcode: "",
+    preferredContactMethod: "",
+    emergencyContactName: "",
+    emergencyContactPhone: "",
+    emergencyContactRelation: ""
+  });
+  const [siteForm, setSiteForm] = useState({
+    zone: "Community",
+    unit: "",
+    keyWorker: "",
+    supportTier: "Light" as "Enhanced" | "Standard" | "Light",
+    activeStatus: true
   });
 
   const panelRefs: Record<ProfilePanelId, RefObject<HTMLElement>> = {
@@ -695,11 +721,17 @@ export default function PeoplePage() {
   useEffect(() => {
     let isCancelled = false;
 
-    loadServiceUsers().then((users) => {
-      if (!isCancelled) {
+    Promise.all([loadServiceUsers(), loadTeamUsers()])
+      .then(([users, staff]) => {
+        if (isCancelled) return;
         setServiceUsers(users);
-      }
-    });
+        setTeamUsers(staff.filter((person) => person.status === "active"));
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsLoadingUsers(false);
+        }
+      });
 
     return () => {
       isCancelled = true;
@@ -741,13 +773,41 @@ export default function PeoplePage() {
       setShowDocForm(false);
       setNewDocTitle("");
       setNewDocCategory(documentCategories[0]);
-      setPersonalOverrides({});
+      setPersonalSaveError("");
+      setSiteSaveError("");
+      setContactSaveError("");
+      const parsedSiteAddress = parseAddressParts(selectedServiceUser?.address || "");
+      const currentZone = selectedServiceUser?.zone || "Community";
+      const isDefinedBuilding = definedBuildingZones.includes(currentZone);
+      const defaultSiteUnit = isDefinedBuilding ? parsedSiteAddress.line1 : selectedServiceUser?.address || "";
+      setSiteForm({
+        zone: currentZone,
+        unit: defaultSiteUnit,
+        keyWorker: selectedServiceUser?.keyWorker || "",
+        supportTier: supportTierFromRiskLevel(selectedServiceUser?.riskLevel || ""),
+        activeStatus: selectedServiceUser?.status === "active"
+      });
+      const parsedAddress = parseAddressParts(selectedServiceUser?.address || "");
+      setContactForm({
+        email: selectedServiceUser?.email || "",
+        phone: selectedServiceUser?.phone || "",
+        mobilePhone: selectedServiceUser?.mobilePhone || "",
+        line1: parsedAddress.line1,
+        street: parsedAddress.street,
+        city: parsedAddress.city,
+        county: parsedAddress.county,
+        postcode: parsedAddress.postcode,
+        preferredContactMethod: selectedServiceUser?.preferredContactMethod || "",
+        emergencyContactName: selectedServiceUser?.emergencyContactName || "",
+        emergencyContactPhone: selectedServiceUser?.emergencyContactPhone || "",
+        emergencyContactRelation: selectedServiceUser?.emergencyContactRelation || ""
+      });
       setPersonalForm({
         preferredName: profileData.preferredName,
         firstName: profileData.firstName,
         lastName: profileData.lastName,
         gender: profileData.gender,
-        dateOfBirth: formatLongDate(profileData.dateOfBirth),
+        dateOfBirth: profileData.dateOfBirth,
         maritalStatus: profileData.maritalStatus,
         birthplace: profileData.birthplace,
         nationality: profileData.nationality,
@@ -758,7 +818,7 @@ export default function PeoplePage() {
         carerNote: profileData.carerNote
       });
     }
-  }, [profileData, serviceUserId]);
+  }, [profileData, selectedServiceUser, serviceUserId]);
 
   const zoneOptions = useMemo(
     () => Array.from(new Set(serviceUsers.map((serviceUser) => serviceUser.zone))).sort(),
@@ -826,31 +886,141 @@ export default function PeoplePage() {
     setShowDocForm(false);
   }
 
-  function savePersonalInfo(event: React.FormEvent<HTMLFormElement>): void {
+  async function savePersonalInfo(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    const cleanLanguages = personalForm.languages
-      .split(",")
-      .map((w) => w.trim())
-      .filter(Boolean);
+    if (!selectedServiceUser) return;
+    setPersonalSaveError("");
 
-    const overrides: Partial<ServiceUserProfileData> = {
-      preferredName: personalForm.preferredName.trim(),
-      firstName: personalForm.firstName.trim(),
-      lastName: personalForm.lastName.trim(),
-      gender: personalForm.gender.trim(),
-      dateOfBirth: personalForm.dateOfBirth.trim(),
-      maritalStatus: personalForm.maritalStatus.trim(),
-      birthplace: personalForm.birthplace.trim(),
-      nationality: personalForm.nationality.trim(),
-      languages: cleanLanguages,
-      ethnicity: personalForm.ethnicity.trim(),
-      religion: personalForm.religion.trim(),
-      carerGenderPreference: personalForm.carerGenderPreference.trim(),
-      carerNote: personalForm.carerNote.trim()
-    };
+    try {
+      setIsSavingPersonal(true);
+      await updateServiceUser(selectedServiceUser.id, {
+        preferredName: personalForm.preferredName,
+        firstName: personalForm.firstName,
+        lastName: personalForm.lastName,
+        dateOfBirth: personalForm.dateOfBirth,
+        gender: personalForm.gender,
+        maritalStatus: personalForm.maritalStatus,
+        birthplace: personalForm.birthplace,
+        nationality: personalForm.nationality,
+        languagesSpoken: personalForm.languages,
+        ethnicity: personalForm.ethnicity,
+        religion: personalForm.religion,
+        carerGenderPreference: personalForm.carerGenderPreference,
+        carerNote: personalForm.carerNote,
+        email: selectedServiceUser.email || "",
+        phone: selectedServiceUser.phone || "",
+        mobilePhone: selectedServiceUser.mobilePhone || "",
+        address: selectedServiceUser.address || "",
+        nhsNumber: selectedServiceUser.nhsNumber || "",
+        gpDetails: selectedServiceUser.gpDetails || "",
+        riskLevel: selectedServiceUser.riskLevel || "",
+        fundingSource: selectedServiceUser.fundingSource || ""
+      });
+      const users = await loadServiceUsers();
+      setServiceUsers(users);
+      setPersonalEditOpen(false);
+    } catch (error) {
+      setPersonalSaveError(error instanceof Error ? error.message : "Unable to save changes.");
+    } finally {
+      setIsSavingPersonal(false);
+    }
+  }
 
-    setPersonalOverrides(overrides);
-    setPersonalEditOpen(false);
+  async function saveSiteInfo(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!selectedServiceUser) return;
+    setSiteSaveError("");
+
+    try {
+      setIsSavingSite(true);
+      const existingAddressParts = parseAddressParts(selectedServiceUser.address || "");
+      const isDefinedBuilding = definedBuildingZones.includes(siteForm.zone);
+      const nextAddress = isDefinedBuilding
+        ? formatAddressParts({ ...existingAddressParts, line1: siteForm.unit })
+        : siteForm.unit.trim();
+
+      await updateServiceUser(selectedServiceUser.id, {
+        clientType: siteForm.zone,
+        keyWorker: siteForm.keyWorker,
+        activeStatus: siteForm.activeStatus,
+        dischargeDate: siteForm.activeStatus ? "" : selectedServiceUser.dischargeDate || "",
+        riskLevel: riskLevelFromSupportTier(siteForm.supportTier),
+        firstName: selectedServiceUser.firstName || profileData?.firstName || "",
+        lastName: selectedServiceUser.lastName || profileData?.lastName || "",
+        dateOfBirth: selectedServiceUser.dateOfBirth || profileData?.dateOfBirth || "",
+        gender: selectedServiceUser.gender || profileData?.gender || "",
+        maritalStatus: selectedServiceUser.maritalStatus || profileData?.maritalStatus || "",
+        birthplace: selectedServiceUser.birthplace || profileData?.birthplace || "",
+        nationality: selectedServiceUser.nationality || profileData?.nationality || "",
+        languagesSpoken: selectedServiceUser.languagesSpoken || profileData?.languages.join(", ") || "",
+        ethnicity: selectedServiceUser.ethnicity || profileData?.ethnicity || "",
+        religion: selectedServiceUser.religion || profileData?.religion || "",
+        carerGenderPreference: selectedServiceUser.carerGenderPreference || profileData?.carerGenderPreference || "",
+        carerNote: selectedServiceUser.carerNote || profileData?.carerNote || "",
+        email: selectedServiceUser.email || "",
+        phone: selectedServiceUser.phone || "",
+        mobilePhone: selectedServiceUser.mobilePhone || "",
+        address: nextAddress,
+        preferredContactMethod: selectedServiceUser.preferredContactMethod || "",
+        emergencyContactName: selectedServiceUser.emergencyContactName || "",
+        emergencyContactPhone: selectedServiceUser.emergencyContactPhone || "",
+        emergencyContactRelation: selectedServiceUser.emergencyContactRelation || "",
+        nhsNumber: selectedServiceUser.nhsNumber || "",
+        gpDetails: selectedServiceUser.gpDetails || "",
+        fundingSource: selectedServiceUser.fundingSource || ""
+      });
+
+      const users = await loadServiceUsers();
+      setServiceUsers(users);
+      setSiteEditOpen(false);
+    } catch (error) {
+      setSiteSaveError(error instanceof Error ? error.message : "Unable to save site information.");
+    } finally {
+      setIsSavingSite(false);
+    }
+  }
+
+  async function saveContactInfo(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!selectedServiceUser) return;
+    setContactSaveError("");
+
+    try {
+      setIsSavingContact(true);
+      await updateServiceUser(selectedServiceUser.id, {
+        firstName: selectedServiceUser.firstName || profileData?.firstName || "",
+        lastName: selectedServiceUser.lastName || profileData?.lastName || "",
+        dateOfBirth: selectedServiceUser.dateOfBirth || profileData?.dateOfBirth || "",
+        gender: selectedServiceUser.gender || profileData?.gender || "",
+        maritalStatus: selectedServiceUser.maritalStatus || profileData?.maritalStatus || "",
+        birthplace: selectedServiceUser.birthplace || profileData?.birthplace || "",
+        nationality: selectedServiceUser.nationality || profileData?.nationality || "",
+        languagesSpoken: selectedServiceUser.languagesSpoken || profileData?.languages.join(", ") || "",
+        ethnicity: selectedServiceUser.ethnicity || profileData?.ethnicity || "",
+        religion: selectedServiceUser.religion || profileData?.religion || "",
+        carerGenderPreference: selectedServiceUser.carerGenderPreference || profileData?.carerGenderPreference || "",
+        carerNote: selectedServiceUser.carerNote || profileData?.carerNote || "",
+        email: contactForm.email,
+        phone: contactForm.phone,
+        mobilePhone: contactForm.mobilePhone,
+        address: formatAddressParts(contactForm),
+        preferredContactMethod: contactForm.preferredContactMethod,
+        emergencyContactName: contactForm.emergencyContactName,
+        emergencyContactPhone: contactForm.emergencyContactPhone,
+        emergencyContactRelation: contactForm.emergencyContactRelation,
+        nhsNumber: selectedServiceUser.nhsNumber || "",
+        gpDetails: selectedServiceUser.gpDetails || "",
+        riskLevel: selectedServiceUser.riskLevel || "",
+        fundingSource: selectedServiceUser.fundingSource || ""
+      });
+      const users = await loadServiceUsers();
+      setServiceUsers(users);
+      setContactEditOpen(false);
+    } catch (error) {
+      setContactSaveError(error instanceof Error ? error.message : "Unable to save contact details.");
+    } finally {
+      setIsSavingContact(false);
+    }
   }
 
   function toggleZoneFilter(zone: string): void {
@@ -895,12 +1065,47 @@ export default function PeoplePage() {
     event.target.value = "";
   }
 
-  if (serviceUserId && !selectedServiceUser) {
+  async function handleCreateServiceUser(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setCreateError("");
+    if (!createForm.firstName.trim() || !createForm.lastName.trim()) {
+      setCreateError("First name and last name are required.");
+      return;
+    }
+
+    try {
+      setIsCreatingUser(true);
+      const created = await createServiceUser({
+        firstName: createForm.firstName,
+        lastName: createForm.lastName,
+        clientType: createForm.clientType,
+        riskLevel: createForm.riskLevel,
+        activeStatus: createForm.activeStatus
+      });
+      const users = await loadServiceUsers();
+      setServiceUsers(users);
+      setShowCreateForm(false);
+      setCreateForm({
+        firstName: "",
+        lastName: "",
+        clientType: "Community",
+        riskLevel: "Low",
+        activeStatus: true
+      });
+      navigate(`/people/${created.id}`);
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : "Unable to create service user.");
+    } finally {
+      setIsCreatingUser(false);
+    }
+  }
+
+  if (serviceUserId && !selectedServiceUser && !isLoadingUsers) {
     return (
       <section className="people-profile-page">
         <article className="people-empty-state">
           <h2>Service user not found</h2>
-          <p>This profile is unavailable or no longer exists in the current mock dataset.</p>
+          <p>This profile is unavailable or no longer exists in the current dataset.</p>
           <button type="button" className="btn-outline" onClick={() => navigate("/people")}>
             Back to People list
           </button>
@@ -1068,6 +1273,7 @@ export default function PeoplePage() {
 
               {personalEditOpen ? (
                 <form className="people-personal-form" onSubmit={savePersonalInfo}>
+                  {personalSaveError ? <div className="alert-error">{personalSaveError}</div> : null}
                   <div className="people-personal-grid">
                     <label>
                       <span>Preferred name</span>
@@ -1177,10 +1383,15 @@ export default function PeoplePage() {
                     </label>
                   </div>
                   <div className="people-personal-actions">
-                    <button type="submit" className="btn-solid">
-                      Save
+                    <button type="submit" className="btn-solid" disabled={isSavingPersonal}>
+                      {isSavingPersonal ? "Saving..." : "Save"}
                     </button>
-                    <button type="button" className="btn-ghost" onClick={() => setPersonalEditOpen(false)}>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      onClick={() => setPersonalEditOpen(false)}
+                      disabled={isSavingPersonal}
+                    >
                       Cancel
                     </button>
                   </div>
@@ -1188,31 +1399,29 @@ export default function PeoplePage() {
               ) : (
                 renderTableRows(
                   [
-                    { label: "Preferred name", value: personalOverrides.preferredName ?? profileData.preferredName },
-                    { label: "First name", value: personalOverrides.firstName ?? profileData.firstName },
-                    { label: "Last name", value: personalOverrides.lastName ?? profileData.lastName },
-                    { label: "Gender", value: personalOverrides.gender ?? profileData.gender },
+                    { label: "Preferred name", value: profileData.preferredName || "Not recorded" },
+                    { label: "First name", value: profileData.firstName || "Not recorded" },
+                    { label: "Last name", value: profileData.lastName || "Not recorded" },
+                    { label: "Gender", value: profileData.gender || "Not recorded" },
                     {
                       label: "Date of birth",
-                      value:
-                        (personalOverrides.dateOfBirth || profileData.dateOfBirth) &&
-                        `${personalOverrides.dateOfBirth || formatLongDate(profileData.dateOfBirth)}`
+                      value: profileData.dateOfBirth ? formatLongDate(profileData.dateOfBirth) : "Not recorded"
                     },
-                    { label: "Marital status", value: personalOverrides.maritalStatus ?? profileData.maritalStatus },
-                    { label: "Birthplace", value: personalOverrides.birthplace ?? profileData.birthplace },
-                    { label: "Nationality", value: personalOverrides.nationality ?? profileData.nationality },
+                    { label: "Marital status", value: profileData.maritalStatus || "Not recorded" },
+                    { label: "Birthplace", value: profileData.birthplace || "Not recorded" },
+                    { label: "Nationality", value: profileData.nationality || "Not recorded" },
                     {
                       label: "Languages spoken",
-                      value: (personalOverrides.languages || profileData.languages).filter(Boolean).join(", ")
+                      value: profileData.languages.filter(Boolean).join(", ") || "Not recorded"
                     },
-                    { label: "Ethnicity", value: personalOverrides.ethnicity ?? profileData.ethnicity },
-                    { label: "Religion", value: personalOverrides.religion ?? profileData.religion },
+                    { label: "Ethnicity", value: profileData.ethnicity || "Not recorded" },
+                    { label: "Religion", value: profileData.religion || "Not recorded" },
                     {
                       label: "Carer gender preference",
-                      value: personalOverrides.carerGenderPreference ?? profileData.carerGenderPreference
+                      value: profileData.carerGenderPreference || "Not recorded"
                     },
-                    { label: "Carer note", value: personalOverrides.carerNote ?? profileData.carerNote }
-                  ].filter((row) => row.value && row.value.trim().length > 0)
+                    { label: "Carer note", value: profileData.carerNote || "Not recorded" }
+                  ]
                 )
               )}
             </article>
@@ -1220,12 +1429,107 @@ export default function PeoplePage() {
             <article ref={panelRefs.general} className={`people-profile-card ${panelIs("general") ? "focus" : ""}`}>
               <header>
                 <h2>Site related information</h2>
-                <button type="button" className="profile-edit-btn">
+                <button type="button" className="profile-edit-btn" onClick={() => setSiteEditOpen((v) => !v)}>
                   <EditIcon />
-                  Edit
+                  {siteEditOpen ? "Close" : "Edit"}
                 </button>
               </header>
-              {renderTableRows(profileData.siteInfo)}
+              {siteEditOpen ? (
+                <form className="people-contact-form" onSubmit={saveSiteInfo}>
+                  {siteSaveError ? <div className="alert-error">{siteSaveError}</div> : null}
+                  <div className="people-contact-form-grid">
+                    <label>
+                      <span>Zone</span>
+                      <select
+                        value={siteForm.zone}
+                        onChange={(event) => {
+                          const nextZone = event.target.value;
+                          const parsedAddress = parseAddressParts(selectedServiceUser?.address || "");
+                          const isDefinedBuilding = definedBuildingZones.includes(nextZone);
+                          setSiteForm((current) => ({
+                            ...current,
+                            zone: nextZone,
+                            unit: isDefinedBuilding ? parsedAddress.line1 : selectedServiceUser?.address || current.unit
+                          }));
+                        }}
+                      >
+                        {Array.from(new Set([...zoneSelectOptions, selectedServiceUser.zone])).map((zone) => (
+                          <option key={zone} value={zone}>
+                            {zone}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>{definedBuildingZones.includes(siteForm.zone) ? "House number / Unit" : "Community address"}</span>
+                      <input
+                        type="text"
+                        value={siteForm.unit}
+                        onChange={(event) => setSiteForm((current) => ({ ...current, unit: event.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Key worker</span>
+                      <select
+                        value={siteForm.keyWorker}
+                        onChange={(event) => setSiteForm((current) => ({ ...current, keyWorker: event.target.value }))}
+                      >
+                        <option value="">Unassigned</option>
+                        {teamUsers.map((member) => (
+                          <option key={member.id} value={member.name}>
+                            {member.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>Support tier</span>
+                      <select
+                        value={siteForm.supportTier}
+                        onChange={(event) =>
+                          setSiteForm((current) => ({
+                            ...current,
+                            supportTier: event.target.value as (typeof supportTierOptions)[number]
+                          }))
+                        }
+                      >
+                        {supportTierOptions.map((tier) => (
+                          <option key={tier} value={tier}>
+                            {tier}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>Status</span>
+                      <select
+                        value={siteForm.activeStatus ? "active" : "inactive"}
+                        onChange={(event) =>
+                          setSiteForm((current) => ({ ...current, activeStatus: event.target.value === "active" }))
+                        }
+                      >
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="people-contact-form-actions">
+                    <button type="submit" className="btn-solid" disabled={isSavingSite}>
+                      {isSavingSite ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      onClick={() => setSiteEditOpen(false)}
+                      disabled={isSavingSite}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                renderTableRows(profileData.siteInfo)
+              )}
             </article>
 
             <article
@@ -1234,12 +1538,134 @@ export default function PeoplePage() {
             >
               <header>
                 <h2>Contact details</h2>
-                <button type="button" className="profile-edit-btn">
+                <button type="button" className="profile-edit-btn" onClick={() => setContactEditOpen((v) => !v)}>
                   <EditIcon />
-                  Edit
+                  {contactEditOpen ? "Close" : "Edit"}
                 </button>
               </header>
-              {renderTableRows(profileData.contactInfo)}
+              {contactEditOpen ? (
+                <form className="people-contact-form" onSubmit={saveContactInfo}>
+                  {contactSaveError ? <div className="alert-error">{contactSaveError}</div> : null}
+                  <div className="people-contact-form-grid">
+                    <label>
+                      <span>Primary phone</span>
+                      <input
+                        type="text"
+                        value={contactForm.phone}
+                        onChange={(e) => setContactForm((form) => ({ ...form, phone: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Mobile phone</span>
+                      <input
+                        type="text"
+                        value={contactForm.mobilePhone}
+                        onChange={(e) => setContactForm((form) => ({ ...form, mobilePhone: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Email</span>
+                      <input
+                        type="email"
+                        value={contactForm.email}
+                        onChange={(e) => setContactForm((form) => ({ ...form, email: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Number / Name</span>
+                      <input
+                        type="text"
+                        value={contactForm.line1}
+                        onChange={(e) => setContactForm((form) => ({ ...form, line1: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Street</span>
+                      <input
+                        type="text"
+                        value={contactForm.street}
+                        onChange={(e) => setContactForm((form) => ({ ...form, street: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>City</span>
+                      <input
+                        type="text"
+                        value={contactForm.city}
+                        onChange={(e) => setContactForm((form) => ({ ...form, city: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>County</span>
+                      <input
+                        type="text"
+                        value={contactForm.county}
+                        onChange={(e) => setContactForm((form) => ({ ...form, county: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Postcode</span>
+                      <input
+                        type="text"
+                        value={contactForm.postcode}
+                        onChange={(e) => setContactForm((form) => ({ ...form, postcode: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Preferred contact</span>
+                      <select
+                        value={contactForm.preferredContactMethod}
+                        onChange={(e) => setContactForm((form) => ({ ...form, preferredContactMethod: e.target.value }))}
+                      >
+                        <option value="">Not recorded</option>
+                        <option value="Text">Text</option>
+                        <option value="Call">Call</option>
+                        <option value="WhatsApp">WhatsApp</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Emergency contact</span>
+                      <input
+                        type="text"
+                        value={contactForm.emergencyContactName}
+                        onChange={(e) => setContactForm((form) => ({ ...form, emergencyContactName: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Emergency phone</span>
+                      <input
+                        type="text"
+                        value={contactForm.emergencyContactPhone}
+                        onChange={(e) => setContactForm((form) => ({ ...form, emergencyContactPhone: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>Emergency relation</span>
+                      <input
+                        type="text"
+                        value={contactForm.emergencyContactRelation}
+                        onChange={(e) => setContactForm((form) => ({ ...form, emergencyContactRelation: e.target.value }))}
+                        placeholder="Family, friend, advocate..."
+                      />
+                    </label>
+                  </div>
+                  <div className="people-contact-form-actions">
+                    <button type="submit" className="btn-solid" disabled={isSavingContact}>
+                      {isSavingContact ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      onClick={() => setContactEditOpen(false)}
+                      disabled={isSavingContact}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                renderTableRows(profileData.contactInfo)
+              )}
             </article>
 
             <article
@@ -1493,6 +1919,9 @@ export default function PeoplePage() {
         </div>
 
         <div className="people-header-tools">
+          <button type="button" className="btn-solid" onClick={() => setShowCreateForm((current) => !current)}>
+            {showCreateForm ? "Close create" : "Create service user"}
+          </button>
           <label className="people-search" aria-label="Search service users">
             <SearchIcon />
             <input
@@ -1507,6 +1936,82 @@ export default function PeoplePage() {
           </button>
         </div>
       </header>
+
+      {showCreateForm ? (
+        <article className="people-create-card">
+          <div className="people-create-head">
+            <div>
+              <p className="eyebrow">Onboarding</p>
+              <h2>Create service user</h2>
+              <p>Add a new client profile to your company roster.</p>
+            </div>
+          </div>
+          {createError ? <div className="alert-error">{createError}</div> : null}
+          <form className="people-create-form" onSubmit={handleCreateServiceUser}>
+            <div className="people-create-grid">
+              <label>
+                <span>First name</span>
+                <input
+                  type="text"
+                  value={createForm.firstName}
+                  onChange={(event) => setCreateForm((prev) => ({ ...prev, firstName: event.target.value }))}
+                  required
+                />
+              </label>
+              <label>
+                <span>Last name</span>
+                <input
+                  type="text"
+                  value={createForm.lastName}
+                  onChange={(event) => setCreateForm((prev) => ({ ...prev, lastName: event.target.value }))}
+                  required
+                />
+              </label>
+              <label>
+                <span>Client type</span>
+                <select
+                  value={createForm.clientType}
+                  onChange={(event) => setCreateForm((prev) => ({ ...prev, clientType: event.target.value }))}
+                >
+                  <option value="Community">Community</option>
+                  <option value="Residential">Residential</option>
+                </select>
+              </label>
+              <label>
+                <span>Risk level</span>
+                <select
+                  value={createForm.riskLevel}
+                  onChange={(event) => setCreateForm((prev) => ({ ...prev, riskLevel: event.target.value }))}
+                >
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                </select>
+              </label>
+              <label>
+                <span>Active status</span>
+                <select
+                  value={createForm.activeStatus ? "true" : "false"}
+                  onChange={(event) =>
+                    setCreateForm((prev) => ({ ...prev, activeStatus: event.target.value === "true" }))
+                  }
+                >
+                  <option value="true">Active</option>
+                  <option value="false">Inactive</option>
+                </select>
+              </label>
+            </div>
+            <div className="people-create-actions">
+              <button type="submit" className="btn-solid" disabled={isCreatingUser}>
+                {isCreatingUser ? "Creating..." : "Create user"}
+              </button>
+              <button type="button" className="btn-ghost" onClick={() => setShowCreateForm(false)} disabled={isCreatingUser}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        </article>
+      ) : null}
 
       <div className="people-metrics">
         <article className="people-metric-card">
@@ -1599,7 +2104,11 @@ export default function PeoplePage() {
             <span>{statusFilters.length + zoneFilters.length + flagFilters.length} active filters</span>
           </div>
 
-          {filteredUsers.length === 0 ? (
+          {isLoadingUsers ? (
+            <article className="people-empty-state">
+              <h2>Loading users...</h2>
+            </article>
+          ) : filteredUsers.length === 0 ? (
             <article className="people-empty-state">
               <h2>No service users found</h2>
               <p>Try removing one or more filters, or broaden your search terms.</p>

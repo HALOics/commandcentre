@@ -6,8 +6,8 @@ import moodNeutralIcon from "../assets/moods/mood_neutral.png";
 import moodLowIcon from "../assets/moods/mood_low.png";
 import moodLowestIcon from "../assets/moods/mood_lowest.png";
 import { getAppSessionToken } from "../auth/appSession";
-import { loadTeamUsers } from "../data/dbClient";
-import type { TeamUser } from "../mock/store";
+import { loadServiceUsers, loadTeamUsers } from "../data/dbClient";
+import type { ServiceUser, TeamUser } from "../mock/store";
 import { WidgetId, WidgetSize } from "./dashboardConfig";
 
 type MoodLevel = "best" | "good" | "neutral" | "low" | "lowest";
@@ -23,17 +23,6 @@ type PersonCard = {
 };
 
 const PEOPLE_WIDGET_MOOD_KEY = "halo_people_widget_mood_enabled";
-
-const people: PersonCard[] = [
-  { name: "Arden Finch", mood: "best", keyWorker: "T. Quinn", zone: "Maple", moodUpdatedMinutes: 18 },
-  { name: "Blaire Mason", mood: "good", keyWorker: "R. Lang", zone: "Harbor", moodUpdatedMinutes: 42 },
-  { name: "Delaney Price", mood: "neutral", keyWorker: "A. Reed", zone: "Orchard", moodUpdatedMinutes: 63 },
-  { name: "Elliot Shore", mood: "good", keyWorker: "S. Ives", zone: "Maple", moodUpdatedMinutes: 27 },
-  { name: "Gray Monroe", mood: "best", keyWorker: "P. North", zone: "Harbor", moodUpdatedMinutes: 35 },
-  { name: "Indigo Hart", mood: "low", keyWorker: "C. Bloom", zone: "Orbit", moodUpdatedMinutes: 9 },
-  { name: "Jules Carter", mood: "good", keyWorker: "D. Flynn", zone: "Orchard", moodUpdatedMinutes: 51 },
-  { name: "Kieran West", mood: "neutral", keyWorker: "V. Mercer", zone: "Maple", moodUpdatedMinutes: 75 }
-];
 
 const moodIcons: Record<MoodLevel, string> = {
   best: moodBestIcon,
@@ -85,7 +74,24 @@ function getInitials(name: string): string {
     .join("");
 }
 
+function mapMood(level: ServiceUser["mood"]): MoodLevel {
+  switch (level) {
+    case "great":
+      return "best";
+    case "good":
+      return "good";
+    case "ok":
+      return "neutral";
+    case "low":
+      return "low";
+    default:
+      return "lowest";
+  }
+}
+
 function PeopleWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
+  const [people, setPeople] = useState<PersonCard[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [showMood, setShowMood] = useState<boolean>(() => {
     if (typeof window === "undefined") {
       return true;
@@ -94,6 +100,41 @@ function PeopleWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
     const saved = window.localStorage.getItem(PEOPLE_WIDGET_MOOD_KEY);
     return saved !== "0";
   });
+
+  useEffect(() => {
+    let isMounted = true;
+    const token = getAppSessionToken();
+
+    if (!token) {
+      setPeople([]);
+      setIsLoading(false);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    loadServiceUsers()
+      .then((users) => {
+        if (!isMounted) return;
+        const activeUsers = users.filter((user) => user.status === "active");
+        const mapped = activeUsers.map((user, index) => ({
+          name: user.name,
+          mood: mapMood(user.mood),
+          keyWorker: user.keyWorker || "Unassigned",
+          zone: user.zone || "Community",
+          moodUpdatedMinutes: (index + 1) * 7
+        }));
+        setPeople(mapped);
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setIsLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -138,7 +179,7 @@ function PeopleWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
       <>
         <div className="brief-block">
           <p className="summary-copy">
-            <strong>8</strong> active profiles
+            <strong>{people.length}</strong> active profiles
           </p>
         </div>
         <div className="widget-actions">
@@ -153,6 +194,7 @@ function PeopleWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
 
   return (
     <>
+      {isLoading ? <p className="summary-copy">Loading service users...</p> : null}
       <div className="widget-row">
         <label className="widget-select" aria-label="Arrange service users">
           <span>Arrange</span>
@@ -218,6 +260,7 @@ function PeopleWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
           </div>
         ))}
       </div>
+      {!isLoading && sortedPeople.length === 0 ? <p className="summary-copy">No active service users.</p> : null}
       {size === "detailed" ? <p className="summary-copy">2 onboarding profiles need completion this week.</p> : null}
       <div className="widget-actions">
         <Link className="btn-outline" to="/people">
@@ -260,10 +303,11 @@ function TeamWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
   }, []);
 
   if (size === "brief") {
+    const activeCount = teamMembers.filter((member) => member.status === "active").length;
     return (
       <div className="brief-block">
         <p className="summary-copy">
-          <strong>{teamMembers.length}</strong> team members
+          <strong>{activeCount}</strong> team members
         </p>
       </div>
     );
@@ -271,14 +315,15 @@ function TeamWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
 
   const [sortKey, setSortKey] = useState<TeamSortKey>("none");
   const [filterValue, setFilterValue] = useState<string>("all");
+  const activeTeamMembers = teamMembers.filter((member) => member.status === "active");
 
   const lineManagerOptions = Array.from(
-    new Set(teamMembers.map((m) => m.lineManager).filter((value): value is string => Boolean(value)))
+    new Set(activeTeamMembers.map((m) => m.lineManager).filter((value): value is string => Boolean(value)))
   ).sort();
-  const zoneOptions = Array.from(new Set(teamMembers.map((m) => m.role).filter(Boolean))).sort();
+  const zoneOptions = Array.from(new Set(activeTeamMembers.map((m) => m.role).filter(Boolean))).sort();
 
   const sortedTeam = (() => {
-    const base = size === "detailed" ? teamMembers : teamMembers.slice(0, 6);
+    const base = size === "detailed" ? activeTeamMembers : activeTeamMembers.slice(0, 6);
     let list = [...base];
 
     if (sortKey === "lineManager" && filterValue !== "all") {
@@ -353,7 +398,21 @@ function TeamWidgetBody({ size }: { size: WidgetSize }): JSX.Element {
       <div className="avatar-grid compact">
         {sortedTeam.map((member) => (
           <div key={member.id} className="avatar-chip">
-            <span>{getInitials(member.name)}</span>
+            <span
+              className="avatar-face"
+              style={
+                member.avatarUrl
+                  ? {
+                      backgroundImage: `url(${member.avatarUrl})`,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center",
+                      color: "transparent"
+                    }
+                  : undefined
+              }
+            >
+              {!member.avatarUrl ? getInitials(member.name) : null}
+            </span>
             <small>{member.name}</small>
           </div>
         ))}

@@ -20,6 +20,7 @@ const DB_API_BASE = import.meta.env.VITE_DB_API_BASE ?? "/api/db";
 const DATA_SOURCE_MODE = (import.meta.env.VITE_DATA_SOURCE ?? "auto") as "auto" | "db" | "mock";
 const TEAM_STORE_KEY = "halo-team-overrides";
 const TEAM_ROLES_KEY = "halo-team-roles";
+const TEAM_AVATARS_KEY = "halo-team-avatars";
 
 function shouldUseMockData(): boolean {
   return DATA_SOURCE_MODE === "mock";
@@ -53,6 +54,26 @@ function readTeamRoles(): string[] {
 
 function writeTeamRoles(roles: string[]) {
   localStorage.setItem(TEAM_ROLES_KEY, JSON.stringify(roles));
+}
+
+function readTeamAvatars(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(TEAM_AVATARS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeTeamAvatars(avatars: Record<string, string>): void {
+  localStorage.setItem(TEAM_AVATARS_KEY, JSON.stringify(avatars));
+}
+
+function mergeAvatar(user: TeamUser, avatars: Record<string, string>): TeamUser {
+  const avatarUrl = avatars[user.id] || user.avatarUrl;
+  return avatarUrl ? { ...user, avatarUrl } : user;
 }
 
 function uniqueSorted(values: string[]): string[] {
@@ -123,8 +144,11 @@ async function writeApi<T>(
     }
 
     return payload;
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error("Request failed");
   }
 }
 
@@ -155,7 +179,6 @@ export async function loadTeamUsers(): Promise<TeamUser[]> {
       const override = matchingOverrides.find((o) => o.id === u.id);
       return override ? { ...u, ...override } : u;
     });
-
     return merged;
   }
 
@@ -203,7 +226,8 @@ export async function loadTeamUsers(): Promise<TeamUser[]> {
       isLineManager: Boolean(o.isLineManager)
     })) as TeamUser[];
 
-  return [...merged, ...overridesWithoutBase, ...missingManagers];
+  const avatars = readTeamAvatars();
+  return [...merged, ...overridesWithoutBase, ...missingManagers].map((user) => mergeAvatar(user, avatars));
 }
 
 export async function findTeamUser(id: string): Promise<TeamUser | null> {
@@ -234,6 +258,11 @@ export async function createTeamUser(input: Partial<TeamUser>): Promise<TeamUser
   }
 
   const saved = apiSaved?.data ?? payload;
+  if (!token && saved.avatarUrl) {
+    const avatars = readTeamAvatars();
+    avatars[saved.id] = saved.avatarUrl;
+    writeTeamAvatars(avatars);
+  }
   if (!token) {
     const overrides = readTeamOverrides();
     const without = overrides.filter((o) => o.id !== saved.id);
@@ -272,7 +301,13 @@ export async function updateTeamUser(updated: TeamUser): Promise<TeamUser> {
 
     writeTeamOverrides(nextOverrides);
   }
-  return result?.data ?? normalized;
+  const saved = result?.data ?? normalized;
+  if (!token && saved.avatarUrl) {
+    const avatars = readTeamAvatars();
+    avatars[saved.id] = saved.avatarUrl;
+    writeTeamAvatars(avatars);
+  }
+  return saved;
 }
 
 export async function deleteTeamUser(id: string): Promise<boolean> {
@@ -289,9 +324,156 @@ export async function deleteTeamUser(id: string): Promise<boolean> {
   return result !== null;
 }
 
+export async function inviteTeamUser(id: string): Promise<void> {
+  const token = getAppSessionToken();
+  if (!token) {
+    throw new Error("You must be signed in to send invites.");
+  }
+
+  const normalizedId = id.trim();
+  if (!normalizedId) {
+    throw new Error("Invalid user id.");
+  }
+
+  await writeApi<{ email: string }>(`/company-users/${encodeURIComponent(normalizedId)}/invite`, "POST");
+}
+
 export async function loadServiceUsers(): Promise<ServiceUser[]> {
+  const token = getAppSessionToken();
   const users = await readApi<ServiceUser[]>("/service-users");
+  if (token) {
+    return users ?? [];
+  }
   return users && users.length > 0 ? users : mockServiceUsers;
+}
+
+export async function createServiceUser(input: {
+  firstName: string;
+  lastName: string;
+  clientType?: string;
+  dateOfBirth?: string;
+  gender?: string;
+  email?: string;
+  phone?: string;
+  mobilePhone?: string;
+  address?: string;
+  nhsNumber?: string;
+  gpDetails?: string;
+  riskLevel?: string;
+  fundingSource?: string;
+  activeStatus?: boolean;
+  dischargeDate?: string;
+}): Promise<ServiceUser> {
+  const token = getAppSessionToken();
+  if (!token) {
+    throw new Error("You must be signed in to create service users.");
+  }
+
+  const payload = {
+    firstName: input.firstName.trim(),
+    lastName: input.lastName.trim(),
+    clientType: (input.clientType || "Community").trim(),
+    dateOfBirth: (input.dateOfBirth || "").trim(),
+    gender: (input.gender || "").trim(),
+    email: (input.email || "").trim(),
+    phone: (input.phone || "").trim(),
+    mobilePhone: (input.mobilePhone || "").trim(),
+    address: (input.address || "").trim(),
+    nhsNumber: (input.nhsNumber || "").trim(),
+    gpDetails: (input.gpDetails || "").trim(),
+    riskLevel: (input.riskLevel || "Low").trim(),
+    fundingSource: (input.fundingSource || "").trim(),
+    activeStatus: input.activeStatus ?? true,
+    dischargeDate: (input.dischargeDate || "").trim()
+  };
+
+  if (!payload.firstName || !payload.lastName) {
+    throw new Error("First name and last name are required.");
+  }
+
+  const result = await writeApi<ServiceUser>("/service-users", "POST", payload);
+  if (!result?.data) {
+    throw new Error("Unable to create service user.");
+  }
+  return result.data;
+}
+
+export async function updateServiceUser(
+  id: string,
+  input: {
+    clientType?: string;
+    activeStatus?: boolean;
+    dischargeDate?: string;
+    keyWorker?: string;
+    firstName?: string;
+    lastName?: string;
+    dateOfBirth?: string;
+    gender?: string;
+    email?: string;
+    phone?: string;
+    mobilePhone?: string;
+    address?: string;
+    nhsNumber?: string;
+    gpDetails?: string;
+    riskLevel?: string;
+    fundingSource?: string;
+    preferredName?: string;
+    maritalStatus?: string;
+    birthplace?: string;
+    nationality?: string;
+    languagesSpoken?: string;
+    ethnicity?: string;
+    religion?: string;
+    carerGenderPreference?: string;
+    carerNote?: string;
+    emergencyContactName?: string;
+    emergencyContactPhone?: string;
+    emergencyContactRelation?: string;
+    preferredContactMethod?: string;
+  }
+): Promise<ServiceUser> {
+  const token = getAppSessionToken();
+  if (!token) {
+    throw new Error("You must be signed in to update service users.");
+  }
+
+  const payload = {
+    clientType: input.clientType?.trim(),
+    activeStatus: input.activeStatus,
+    dischargeDate: input.dischargeDate?.trim(),
+    keyWorker: input.keyWorker?.trim(),
+    firstName: input.firstName?.trim(),
+    lastName: input.lastName?.trim(),
+    dateOfBirth: input.dateOfBirth?.trim(),
+    gender: input.gender?.trim(),
+    email: input.email?.trim(),
+    phone: input.phone?.trim(),
+    mobilePhone: input.mobilePhone?.trim(),
+    address: input.address?.trim(),
+    nhsNumber: input.nhsNumber?.trim(),
+    gpDetails: input.gpDetails?.trim(),
+    riskLevel: input.riskLevel?.trim(),
+    fundingSource: input.fundingSource?.trim(),
+    preferredName: input.preferredName?.trim(),
+    maritalStatus: input.maritalStatus?.trim(),
+    birthplace: input.birthplace?.trim(),
+    nationality: input.nationality?.trim(),
+    languagesSpoken: input.languagesSpoken?.trim(),
+    ethnicity: input.ethnicity?.trim(),
+    religion: input.religion?.trim(),
+    carerGenderPreference: input.carerGenderPreference?.trim(),
+    carerNote: input.carerNote?.trim(),
+    emergencyContactName: input.emergencyContactName?.trim(),
+    emergencyContactPhone: input.emergencyContactPhone?.trim(),
+    emergencyContactRelation: input.emergencyContactRelation?.trim(),
+    preferredContactMethod: input.preferredContactMethod?.trim()
+  };
+
+  const result = await writeApi<ServiceUser>(`/service-users/${encodeURIComponent(id)}`, "PUT", payload);
+  if (!result?.data) {
+    throw new Error("Unable to update service user.");
+  }
+  return result.data;
 }
 
 export async function loadRotaShifts(): Promise<RotaShift[]> {

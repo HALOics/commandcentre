@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { createTeamUser, findTeamUser, loadTeamRoles, loadTeamUsers, updateTeamUser } from "../data/dbClient";
+import { createTeamUser, findTeamUser, inviteTeamUser, loadTeamRoles, loadTeamUsers, updateTeamUser } from "../data/dbClient";
 import type { TeamUser, TeamUserRole, TeamUserStatus } from "../mock/store";
 
 function getInitials(name: string): string {
@@ -10,6 +10,15 @@ function getInitials(name: string): string {
     .join("")
     .slice(0, 2)
     .toUpperCase();
+}
+
+function avatarPaletteClass(value: string): string {
+  let hash = 0;
+  for (let idx = 0; idx < value.length; idx += 1) {
+    hash = (hash * 31 + value.charCodeAt(idx)) | 0;
+  }
+  const palette = Math.abs(hash) % 6;
+  return `palette-${palette}`;
 }
 
 function PencilIcon() {
@@ -25,6 +34,43 @@ function PencilIcon() {
       />
     </svg>
   );
+}
+
+async function optimizeAvatarFile(file: File): Promise<string> {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("Unable to load selected image."));
+      image.src = objectUrl;
+    });
+
+    const maxEdge = 320;
+    const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+    const width = Math.max(1, Math.round(img.width * scale));
+    const height = Math.max(1, Math.round(img.height * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("Unable to process image.");
+    }
+    context.drawImage(img, 0, 0, width, height);
+
+    let quality = 0.82;
+    let result = canvas.toDataURL("image/jpeg", quality);
+    while (result.length > 220_000 && quality > 0.52) {
+      quality -= 0.08;
+      result = canvas.toDataURL("image/jpeg", quality);
+    }
+
+    return result;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 export default function TeamMemberPage() {
@@ -64,9 +110,11 @@ export default function TeamMemberPage() {
             isLineManager: false
           };
           setMember(blank);
+          setAvatarUrl(blank.avatarUrl ?? null);
           setIsLineManager(false);
         } else {
           setMember(user);
+          setAvatarUrl(user?.avatarUrl ?? null);
           setIsLineManager(user?.isLineManager ?? false);
         }
         setLoading(false);
@@ -84,15 +132,20 @@ export default function TeamMemberPage() {
 
   const canSave = useMemo(() => !!member, [member]);
 
-  async function handleSave() {
+  async function handleSave(sendInvite = false) {
     if (!member) return;
     setSaving(true);
     const payload = { ...member, avatarUrl: avatarUrl ?? member.avatarUrl, isLineManager };
     try {
+      let saved: TeamUser;
       if (isNew) {
-        await createTeamUser(payload);
+        saved = await createTeamUser(payload);
       } else {
-        await updateTeamUser(payload);
+        saved = await updateTeamUser(payload);
+      }
+
+      if (sendInvite) {
+        await inviteTeamUser(saved.id);
       }
       navigate("/team");
     } catch (saveError) {
@@ -124,13 +177,15 @@ export default function TeamMemberPage() {
     );
   }
 
+  const fallbackPaletteClass = avatarPaletteClass(member.id || member.email || member.name);
+
   return (
     <section className="module-page">
       <header className="module-hero">
         <div className="member-hero">
           <div className="avatar-wrap">
             <div
-              className="team-avatar large"
+              className={`team-avatar large ${!avatarUrl ? fallbackPaletteClass : ""}`}
               style={
                 avatarUrl
                   ? {
@@ -156,12 +211,15 @@ export default function TeamMemberPage() {
                   const target = e.target as HTMLInputElement;
                   const file = target.files?.[0];
                   if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = () => {
-                    const result = reader.result as string;
-                    setAvatarUrl(result);
-                  };
-                  reader.readAsDataURL(file);
+                  optimizeAvatarFile(file)
+                    .then((result) => {
+                      setAvatarUrl(result);
+                    })
+                    .catch((imageError) => {
+                      const message =
+                        imageError instanceof Error ? imageError.message : "Unable to process selected image.";
+                      setError(message);
+                    });
                 };
                 fileInput.click();
               }}
@@ -177,7 +235,10 @@ export default function TeamMemberPage() {
         </div>
         <div className="hero-actions">
           <button className="btn-ghost" onClick={() => navigate(-1)}>Back</button>
-          <button className="btn-primary" disabled={!canSave || saving} onClick={handleSave}>
+          <button className="btn-outline" disabled={!canSave || saving} onClick={() => handleSave(true)}>
+            {saving ? "Saving…" : "Save & send invite"}
+          </button>
+          <button className="btn-primary" disabled={!canSave || saving} onClick={() => handleSave(false)}>
             {saving ? "Saving…" : "Save changes"}
           </button>
         </div>

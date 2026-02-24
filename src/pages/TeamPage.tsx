@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { loadTeamUsers } from "../data/dbClient";
-import { mockTeamUsers, type TeamUser } from "../mock/store";
+import type { TeamUser } from "../mock/store";
 
 type MemberStatus = TeamUser["status"];
 
@@ -108,7 +108,8 @@ function getInitials(name: string): string {
 
 export default function TeamPage() {
   const navigate = useNavigate();
-  const [teamMembers, setTeamMembers] = useState<TeamUser[]>(mockTeamUsers);
+  const [teamMembers, setTeamMembers] = useState<TeamUser[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilters, setStatusFilters] = useState<MemberStatus[]>(["active"]);
   const [roleFilters, setRoleFilters] = useState<TeamUser["role"][]>([]);
@@ -123,6 +124,10 @@ export default function TeamPage() {
     loadTeamUsers().then((users) => {
       if (!isCancelled) {
         setTeamMembers(users);
+      }
+    }).finally(() => {
+      if (!isCancelled) {
+        setIsLoading(false);
       }
     });
 
@@ -352,7 +357,11 @@ export default function TeamPage() {
         </aside>
 
         <div className="team-list-area">
-          {filteredMembers.length === 0 ? (
+          {isLoading ? (
+            <article className="team-empty-state">
+              <h2>Loading users...</h2>
+            </article>
+          ) : filteredMembers.length === 0 ? (
             <article className="team-empty-state">
               <h2>No team members found</h2>
               <p>Try removing filters or broadening your search query.</p>
@@ -374,7 +383,21 @@ export default function TeamPage() {
                   }}
                 >
                   <div className="team-member-main">
-                    <div className={`team-avatar palette-${index % 6}`}>{getInitials(member.name)}</div>
+                    <div
+                      className={`team-avatar palette-${index % 6}`}
+                      style={
+                        member.avatarUrl
+                          ? {
+                              backgroundImage: `url(${member.avatarUrl})`,
+                              backgroundSize: "cover",
+                              backgroundPosition: "center",
+                              color: "transparent"
+                            }
+                          : undefined
+                      }
+                    >
+                      {!member.avatarUrl ? getInitials(member.name) : null}
+                    </div>
                     <strong className="team-member-name">{member.name}</strong>
                     <a className="team-icon-link" href={`mailto:${member.email}`} aria-label={`Email ${member.name}`}>
                       <MailIcon />

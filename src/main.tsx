@@ -7,6 +7,8 @@ import { applyAccessibilityPreferences, readAccessibilityPreferences } from "./a
 import { validateStoredAppSession } from "./auth/appSession";
 import { msalInstance } from "./auth/msal";
 
+const REDIRECT_ID_TOKEN_KEY = "halo_msal_redirect_id_token";
+
 const rootElement = document.getElementById("root");
 
 if (!rootElement) {
@@ -39,6 +41,9 @@ msalInstance
     const redirectResult = await msalInstance.handleRedirectPromise();
     if (redirectResult?.account) {
       msalInstance.setActiveAccount(redirectResult.account);
+      if (redirectResult.idToken) {
+        window.sessionStorage.setItem(REDIRECT_ID_TOKEN_KEY, redirectResult.idToken);
+      }
     } else {
       setInitialAccount();
     }

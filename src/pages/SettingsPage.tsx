@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMsal } from "@azure/msal-react";
+import { approvePendingDevice, loadPendingDevices, rejectPendingDevice } from "../auth/appSession";
 import {
   AccessibilityPreferences,
   TextScaleOption,
@@ -54,6 +55,21 @@ export default function SettingsPage() {
   const [dropTarget, setDropTarget] = useState<WidgetId | null>(null);
   const [roles, setRoles] = useState<string[]>([]);
   const [newRole, setNewRole] = useState("");
+  const [devicesOpen, setDevicesOpen] = useState(false);
+  const [deviceError, setDeviceError] = useState("");
+  const [pendingDevices, setPendingDevices] = useState<
+    Array<{
+      deviceId: string;
+      userId: number;
+      username: string;
+      displayName: string;
+      companyName: string;
+      deviceLabel: string;
+      status: string;
+      requestedAt: string;
+    }>
+  >([]);
+  const [isLoadingDevices, setIsLoadingDevices] = useState(false);
 
   const account = instance.getActiveAccount() ?? accounts[0];
   const accountKey = account?.homeAccountId || account?.username || "local";
@@ -141,6 +157,37 @@ export default function SettingsPage() {
 
   function updateTextScale(nextScale: TextScaleOption): void {
     setAccessibilityPreferences((current) => ({ ...current, textScale: nextScale }));
+  }
+
+  async function refreshPendingDevices() {
+    try {
+      setIsLoadingDevices(true);
+      setDeviceError("");
+      const rows = await loadPendingDevices();
+      setPendingDevices(rows);
+    } catch (error) {
+      setDeviceError(error instanceof Error ? error.message : "Unable to load pending devices.");
+    } finally {
+      setIsLoadingDevices(false);
+    }
+  }
+
+  async function handleApproveDevice(deviceId: string) {
+    try {
+      await approvePendingDevice(deviceId);
+      await refreshPendingDevices();
+    } catch (error) {
+      setDeviceError(error instanceof Error ? error.message : "Unable to approve device.");
+    }
+  }
+
+  async function handleRejectDevice(deviceId: string) {
+    try {
+      await rejectPendingDevice(deviceId);
+      await refreshPendingDevices();
+    } catch (error) {
+      setDeviceError(error instanceof Error ? error.message : "Unable to reject device.");
+    }
   }
 
   return (
@@ -297,6 +344,52 @@ export default function SettingsPage() {
                 Reset to default
               </button>
             </div>
+          </>
+        ) : null}
+      </article>
+
+      <article className="settings-panel">
+        <button
+          className={`settings-section-btn ${devicesOpen ? "active" : ""}`}
+          onClick={() => {
+            setDevicesOpen((current) => !current);
+            if (!devicesOpen) {
+              void refreshPendingDevices();
+            }
+          }}
+          aria-expanded={devicesOpen}
+        >
+          Device Approvals
+          <span>{devicesOpen ? "Collapse" : "Open"}</span>
+        </button>
+
+        {!devicesOpen ? (
+          <p className="settings-collapsed-copy">Approve or reject sign-in requests from new devices.</p>
+        ) : null}
+
+        {devicesOpen ? (
+          <>
+            <p className="settings-panel-copy">Only admin users can approve pending devices.</p>
+            {deviceError ? <div className="alert-error">{deviceError}</div> : null}
+            {isLoadingDevices ? <p className="settings-panel-copy">Loading pending devices...</p> : null}
+            {!isLoadingDevices && pendingDevices.length === 0 ? (
+              <p className="settings-panel-copy">No pending device approvals.</p>
+            ) : null}
+            {!isLoadingDevices && pendingDevices.length > 0 ? (
+              <div className="roles-pills">
+                {pendingDevices.map((device) => (
+                  <span key={device.deviceId} className="role-pill">
+                    {device.displayName || device.username} - {device.deviceLabel}
+                    <button type="button" aria-label="Approve device" onClick={() => void handleApproveDevice(device.deviceId)}>
+                      Approve
+                    </button>
+                    <button type="button" aria-label="Reject device" onClick={() => void handleRejectDevice(device.deviceId)}>
+                      Reject
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </>
         ) : null}
       </article>

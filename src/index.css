@@ -963,7 +963,8 @@ input {
 }
 
 .alert-warning,
-.alert-error {
+.alert-error,
+.alert-success {
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   font-size: 0.9rem;
@@ -977,6 +978,11 @@ input {
 .alert-error {
   background: rgba(255, 152, 177, 0.2);
   border: 1px solid rgba(239, 71, 111, 0.5);
+}
+
+.alert-success {
+  background: rgba(133, 224, 170, 0.18);
+  border: 1px solid rgba(52, 199, 102, 0.5);
 }
 
 .btn-microsoft {
@@ -4033,14 +4039,16 @@ body::before {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   margin-left: auto;
+  min-width: 0;
 }
 
 .people-search {
-  min-width: min(520px, calc(100vw - 72px));
+  min-width: 320px;
   max-width: 620px;
-  width: 100%;
+  width: auto;
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -4514,6 +4522,68 @@ body::before {
 .people-empty-state p {
   margin: 0;
   color: var(--text-soft);
+}
+
+.people-create-card {
+  margin-bottom: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background:
+    linear-gradient(164deg, var(--surface), var(--surface-soft)),
+    radial-gradient(circle at 100% -72%, rgba(255, 156, 91, 0.13), transparent 66%);
+  box-shadow: var(--shadow-sm);
+  display: grid;
+  gap: 12px;
+}
+
+.people-create-head h2 {
+  margin: 4px 0 6px;
+  font-size: 1.22rem;
+}
+
+.people-create-head p {
+  margin: 0;
+  color: var(--text-soft);
+}
+
+.people-create-form {
+  display: grid;
+  gap: 12px;
+}
+
+.people-create-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.people-create-grid label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.people-create-grid label span {
+  font-weight: 700;
+}
+
+.people-create-grid input,
+.people-create-grid select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  color: var(--text-main);
+  padding: 9px 10px;
+  font-size: 0.9rem;
+}
+
+.people-create-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .people-profile-page {
@@ -5124,6 +5194,7 @@ body::before {
 
   .people-header-tools {
     width: 100%;
+    flex-wrap: wrap;
   }
 
   .people-search {
@@ -5142,6 +5213,10 @@ body::before {
 
   .people-profile-menu-card {
     position: static;
+  }
+
+  .people-create-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -5168,6 +5243,10 @@ body::before {
 
   .people-profile-hero-main {
     flex-direction: column;
+  }
+
+  .people-create-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -5223,6 +5302,25 @@ body::before {
   .people-profile-table-row span {
     border-right: none;
     border-bottom: 1px solid var(--line);
+  }
+
+  .people-create-card {
+    border-radius: 14px;
+    padding: 14px;
+  }
+
+  .people-create-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .people-create-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .people-create-actions .btn {
+    width: 100%;
+    justify-content: center;
   }
 }
 

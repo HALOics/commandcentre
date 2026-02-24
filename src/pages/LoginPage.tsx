@@ -1,125 +1,94 @@
-import { useEffect, useState } from "react";
-import { useIsAuthenticated, useMsal } from "@azure/msal-react";
-import type { AccountInfo } from "@azure/msal-browser";
+import { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import { loginRequest, hasMsalConfig } from "../auth/msal";
-import { clearAppSession, exchangeMicrosoftIdToken, hasAppSession, type AppSessionError } from "../auth/appSession";
+import {
+  clearAppSession,
+  completeMagicLogin,
+  enableTotp,
+  hasAppSession,
+  requestEmailMagicLink,
+  requestTotpSetup,
+  type AppSessionError,
+  verifyEmailMagicLink
+} from "../auth/appSession";
 import { isDevAuthenticated, setDevAuthenticated } from "../auth/devAuth";
 import haloLogo from "../assets/halo-logo.svg";
 import clientLogo from "../assets/client-logo.png";
 
-const LOGIN_REDIRECT_INTENT_KEY = "halo_login_redirect_intent";
+function getDeviceFingerprint(): { fingerprint: string; label: string } {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown";
+  const screenSize = typeof window !== "undefined" ? `${window.screen.width}x${window.screen.height}` : "0x0";
+  const payload = [
+    navigator.userAgent || "",
+    navigator.platform || "",
+    navigator.language || "",
+    timezone,
+    screenSize
+  ].join("|");
 
-function MicrosoftIcon() {
-  return (
-    <svg className="ms-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="1" y="1" width="10" height="10" fill="#f35325" />
-      <rect x="13" y="1" width="10" height="10" fill="#81bc06" />
-      <rect x="1" y="13" width="10" height="10" fill="#05a6f0" />
-      <rect x="13" y="13" width="10" height="10" fill="#ffba08" />
-    </svg>
-  );
+  const labelBase = `${navigator.platform || "Device"} · ${navigator.language || "en"}`;
+  return {
+    fingerprint: payload,
+    label: labelBase.slice(0, 180)
+  };
 }
 
 export default function LoginPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { instance } = useMsal();
-  const isAuthenticated = useIsAuthenticated();
   const devAuthenticated = isDevAuthenticated();
   const appSession = hasAppSession();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  const [autoExchangeAttempted, setAutoExchangeAttempted] = useState(false);
+  const [info, setInfo] = useState("");
+  const [email, setEmail] = useState("");
+  const [challengeToken, setChallengeToken] = useState("");
+  const [requiresTotpSetup, setRequiresTotpSetup] = useState(false);
+  const [manualKey, setManualKey] = useState("");
+  const [otpauthUri, setOtpauthUri] = useState("");
+  const [totpCode, setTotpCode] = useState("");
 
   const targetPath = (location.state as { from?: string } | undefined)?.from || "/";
 
-  function getExchangeErrorMessage(error: unknown): string {
-    const appError = error as AppSessionError;
+  function getExchangeErrorMessage(rawError: unknown): string {
+    const appError = rawError as AppSessionError;
     const detail = (appError?.message || "").trim();
-    const detailLower = detail.toLowerCase();
 
-    if (detailLower.includes("server missing azure_client_id")) {
-      return "Server auth config is missing AZURE_CLIENT_ID. Add it to .env and restart the app.";
-    }
-    if (detailLower.includes("token audience mismatch")) {
-      return "Microsoft app mismatch: token audience does not match AZURE_CLIENT_ID.";
-    }
-    if (detailLower.includes("token issuer mismatch")) {
-      return "Tenant mismatch: token issuer does not match the configured tenant.";
-    }
-    if (detailLower.includes("token expired")) {
-      return "Microsoft token expired. Please try sign-in again.";
-    }
-    if (detailLower.includes("azure sql unavailable")) {
-      return "HALO backend cannot reach Azure SQL right now. Please try again shortly.";
-    }
-    if (detailLower.includes("no matching user account")) {
-      return "Microsoft sign-in succeeded, but your account is not mapped in HALO yet. Please contact an admin.";
-    }
-
-    if (appError?.status === 403) {
-      return "Microsoft sign-in succeeded, but your account is not mapped in HALO yet. Please contact an admin.";
-    }
     if (appError?.status === 401) {
-      return detail
-        ? `Microsoft sign-in could not be verified: ${detail}`
-        : "Microsoft sign-in could not be verified. Please try again.";
+      return detail || "Your sign-in link or authenticator code is invalid or expired.";
     }
-    if (appError?.status === 408) {
-      return "Sign-in took too long. Please try again.";
+    if (appError?.status === 403) {
+      return detail || "You do not have access to this action.";
+    }
+    if (appError?.status === 429) {
+      return detail || "Too many attempts. Please wait and try again.";
     }
     if (appError?.status === 503) {
-      return "Login service is temporarily unavailable (Azure SQL unavailable).";
+      return "Login service is temporarily unavailable (database unavailable).";
     }
-    return detail || "Unable to complete Microsoft sign-in. Check popup permissions and your Azure app setup.";
-  }
-
-  async function acquireIdTokenWithTimeout(account: AccountInfo): Promise<string> {
-    const timeoutMs = 30000;
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      window.setTimeout(() => reject(new Error("Token acquisition timed out")), timeoutMs)
-    );
-    const tokenPromise = instance.acquireTokenSilent({ ...loginRequest, account });
-    const result = await Promise.race([tokenPromise, timeoutPromise]);
-    return result.idToken;
-  }
-
-  async function finalizeMicrosoftSignIn(idToken: string): Promise<void> {
-    await exchangeMicrosoftIdToken(idToken);
-    navigate(targetPath, { replace: true });
+    return detail || "Unable to complete sign-in right now.";
   }
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      setAutoExchangeAttempted(false);
-      return;
-    }
-
-    if (appSession || pending || autoExchangeAttempted) return;
-    const hasLoginIntent = window.sessionStorage.getItem(LOGIN_REDIRECT_INTENT_KEY) === "1";
-    if (!hasLoginIntent) return;
-    const active = instance.getActiveAccount() ?? instance.getAllAccounts()[0];
-    if (!active) return;
+    const token = new URLSearchParams(location.search).get("magic_token");
+    if (!token || pending) return;
 
     let cancelled = false;
-    setAutoExchangeAttempted(true);
     setPending(true);
     setError("");
+    setInfo("Verifying sign-in link...");
 
-    acquireIdTokenWithTimeout(active)
-      .then((tokenResult) => {
+    verifyEmailMagicLink(token)
+      .then((result) => {
         if (cancelled) return;
-        window.sessionStorage.removeItem(LOGIN_REDIRECT_INTENT_KEY);
-        return finalizeMicrosoftSignIn(tokenResult);
+        setChallengeToken(result.challengeToken);
+        setRequiresTotpSetup(result.requiresTotpSetup);
+        setInfo(result.requiresTotpSetup ? "Set up your authenticator app to continue." : "Enter your authenticator code to continue.");
       })
-      .catch((authError) => {
+      .catch((verifyError) => {
         if (cancelled) return;
-        console.error(authError);
-        window.sessionStorage.removeItem(LOGIN_REDIRECT_INTENT_KEY);
         clearAppSession();
-        // Keep startup silent when a stale cached Microsoft session cannot be exchanged.
-        setError("");
+        setInfo("");
+        setError(getExchangeErrorMessage(verifyError));
       })
       .finally(() => {
         if (!cancelled) setPending(false);
@@ -128,46 +97,77 @@ export default function LoginPage() {
     return () => {
       cancelled = true;
     };
-  }, [appSession, autoExchangeAttempted, instance, isAuthenticated, pending, targetPath]);
+  }, [location.search, pending]);
 
-  useEffect(() => {
-    if (!pending) return;
-
-    const watchdog = window.setTimeout(() => {
-      setPending(false);
-      window.sessionStorage.removeItem(LOGIN_REDIRECT_INTENT_KEY);
-      setError("Sign-in is taking longer than expected. Please click Continue with Microsoft again.");
-    }, 60000);
-
-    return () => window.clearTimeout(watchdog);
-  }, [pending]);
-
-  async function handleMicrosoftLogin() {
+  async function handleEmailMagicLinkRequest() {
     if (pending) return;
     setError("");
+    setInfo("");
 
-    if (!hasMsalConfig) {
-      setError("Microsoft app settings are missing. Add VITE_AZURE_CLIENT_ID before logging in.");
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) {
+      setError("Enter an email address to continue.");
       return;
     }
 
     try {
       setPending(true);
-      if (isAuthenticated) {
-        const active = instance.getActiveAccount() ?? instance.getAllAccounts()[0];
-        if (!active) {
-          throw new Error("No active Microsoft account found.");
-        }
-        const idToken = await acquireIdTokenWithTimeout(active);
-        await finalizeMicrosoftSignIn(idToken);
+      await requestEmailMagicLink(normalizedEmail);
+      setInfo("If the account exists, a sign-in link has been sent.");
+    } catch (requestError) {
+      setError(getExchangeErrorMessage(requestError));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleStartTotpSetup() {
+    if (!challengeToken || pending) return;
+    setError("");
+
+    try {
+      setPending(true);
+      const setup = await requestTotpSetup(challengeToken);
+      setManualKey(setup.manualKey);
+      setOtpauthUri(setup.otpauthUri);
+      setInfo("Add this account in your authenticator app, then enter the 6-digit code.");
+    } catch (setupError) {
+      setError(getExchangeErrorMessage(setupError));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleCompleteSignIn() {
+    if (!challengeToken || pending) return;
+    setError("");
+
+    if (!/^\d{6}$/.test(totpCode.trim())) {
+      setError("Enter the 6-digit authenticator code.");
+      return;
+    }
+
+    try {
+      setPending(true);
+      if (requiresTotpSetup) {
+        await enableTotp(challengeToken, totpCode.trim());
+      }
+
+      const device = getDeviceFingerprint();
+      const result = await completeMagicLogin({
+        challengeToken,
+        code: totpCode.trim(),
+        deviceFingerprint: device.fingerprint,
+        deviceLabel: device.label
+      });
+
+      if (result.pendingApproval) {
+        setInfo("This is a new device. Login is pending admin approval.");
         return;
       }
 
-      window.sessionStorage.setItem(LOGIN_REDIRECT_INTENT_KEY, "1");
-      await instance.loginRedirect(loginRequest);
-      return;
+      navigate(targetPath, { replace: true });
     } catch (loginError) {
-      console.error(loginError);
       clearAppSession();
       setError(getExchangeErrorMessage(loginError));
     } finally {
@@ -180,7 +180,9 @@ export default function LoginPage() {
     navigate(targetPath, { replace: true });
   }
 
-  if (devAuthenticated || (isAuthenticated && appSession)) {
+  const showTotpPanel = useMemo(() => Boolean(challengeToken), [challengeToken]);
+
+  if (devAuthenticated || appSession) {
     return <Navigate to={targetPath} replace />;
   }
 
@@ -192,33 +194,85 @@ export default function LoginPage() {
         </div>
         <h1>Command Centre</h1>
         <p>
-          Password-free access only. Sign in with your Microsoft 365 identity to open the live HALO operational
-          workspace.
+          Password-free access. Sign in with your email link, verify with authenticator code, and use approved
+          devices only.
         </p>
 
         <ul className="feature-list">
-          <li>Microsoft Entra single sign-on</li>
-          <li>Role-aware operational workspace</li>
-          <li>Live incidents, rota, and eMAR signals</li>
+          <li>Email magic-link sign in</li>
+          <li>Authenticator app (MFA) verification</li>
+          <li>Admin approval required for new devices</li>
         </ul>
       </section>
 
-      <section className="login-card" aria-label="Sign in with Microsoft">
+      <section className="login-card" aria-label="Sign in">
         <div className="login-logo-row" aria-label="Client logo">
           <img className="brand-logo-image brand-logo-client-single" src={clientLogo} alt="Client logo" />
         </div>
 
         <div>
           <h2>Welcome back</h2>
-          <p>Use your organization Microsoft account to continue.</p>
+          <p>Enter your work email to continue.</p>
         </div>
 
         {error ? <div className="alert-error">{error}</div> : null}
+        {info ? <div className="alert-success">{info}</div> : null}
 
-        <button className="btn-microsoft" onClick={handleMicrosoftLogin} disabled={pending}>
-          <MicrosoftIcon />
-          {pending ? "Connecting..." : "Continue with Microsoft"}
-        </button>
+        {!showTotpPanel ? (
+          <>
+            <label className="form-field">
+              <span>Email address</span>
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="name@company.com"
+                disabled={pending}
+              />
+            </label>
+            <button className="btn-solid" onClick={handleEmailMagicLinkRequest} disabled={pending}>
+              {pending ? "Working..." : "Send sign-in link"}
+            </button>
+          </>
+        ) : (
+          <>
+            {requiresTotpSetup ? (
+              <>
+                <button className="btn-outline" onClick={handleStartTotpSetup} disabled={pending || Boolean(manualKey)}>
+                  {manualKey ? "Authenticator setup ready" : "Setup authenticator"}
+                </button>
+                {manualKey ? (
+                  <div className="summary-copy">
+                    Manual key: <strong>{manualKey}</strong>
+                  </div>
+                ) : null}
+                {otpauthUri ? (
+                  <a className="summary-copy" href={otpauthUri}>
+                    Open authenticator setup link
+                  </a>
+                ) : null}
+              </>
+            ) : null}
+
+            <label className="form-field">
+              <span>Authenticator code</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                value={totpCode}
+                onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, ""))}
+                placeholder="123456"
+                disabled={pending}
+              />
+            </label>
+            <button className="btn-solid" onClick={handleCompleteSignIn} disabled={pending}>
+              {pending ? "Verifying..." : "Complete sign in"}
+            </button>
+          </>
+        )}
+
         <button className="btn-dev" onClick={handleDevLogin} disabled={pending}>
           Temporary dev login
         </button>
